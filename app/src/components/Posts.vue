@@ -456,6 +456,7 @@ export default {
     data () {
         return {
             appTheme: '',
+            autoRefreshInterval: null,
             bulkDropdownVisible: false,
             dataLoaded: false,
             filterValue: '',
@@ -593,6 +594,11 @@ export default {
         if (this.$route.params.filter === 'trashed') {
             this.setFilter('is:trashed');
         }
+
+        // Auto-refresh every 30 seconds
+        this.autoRefreshInterval = setInterval(() => {
+            this.refreshPosts(true);
+        }, 30000);
     },
     methods: {
         addNewPost (editorType) {
@@ -837,7 +843,7 @@ export default {
                 this.setFilter('');
             }, 0);
         },
-        refreshPosts () {
+        refreshPosts (silent = false) {
             if (this.isRefreshing) {
                 return;
             }
@@ -853,11 +859,13 @@ export default {
                 this.$store.commit('switchSite', result.data);
                 this.isRefreshing = false;
 
-                this.$bus.$emit('message-display', {
-                    message: this.$t('post.postsRefreshed'),
-                    type: 'success',
-                    lifeTime: 3
-                });
+                if (!silent) {
+                    this.$bus.$emit('message-display', {
+                        message: this.$t('post.postsRefreshed'),
+                        type: 'success',
+                        lifeTime: 3
+                    });
+                }
             });
         },
         ordering (field) {
@@ -917,6 +925,10 @@ export default {
         this.$bus.$off('site-loaded', this.whenSiteLoaded);
         this.$bus.$off('posts-filter-value-changed');
         this.$bus.$off('document-body-clicked', this.closeBulkDropdown);
+
+        if (this.autoRefreshInterval) {
+            clearInterval(this.autoRefreshInterval);
+        }
     }
 }
 </script>

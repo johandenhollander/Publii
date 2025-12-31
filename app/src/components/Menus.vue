@@ -215,6 +215,7 @@ export default {
     },
     data () {
         return {
+            autoRefreshInterval: null,
             editedID: false,
             editorVisible: false,
             filterValue: '',
@@ -271,6 +272,11 @@ export default {
         this.$bus.$on('menus-manager-save-menu-positions', config => {
             this.changeMenu(config.index, config.position, config.maxLevels);
         });
+
+        // Auto-refresh every 30 seconds
+        this.autoRefreshInterval = setInterval(() => {
+            this.refreshMenus(true);
+        }, 30000);
     },
     methods: {
         toggleMenu (index) {
@@ -491,7 +497,7 @@ export default {
                 this.menuPositionPopupVisible = true;
             });
         },
-        refreshMenus () {
+        refreshMenus (silent = false) {
             if (this.isRefreshing) {
                 return;
             }
@@ -507,11 +513,13 @@ export default {
                 this.$store.commit('switchSite', result.data);
                 this.isRefreshing = false;
 
-                this.$bus.$emit('message-display', {
-                    message: this.$t('menu.menusRefreshed'),
-                    type: 'success',
-                    lifeTime: 3
-                });
+                if (!silent) {
+                    this.$bus.$emit('message-display', {
+                        message: this.$t('menu.menusRefreshed'),
+                        type: 'success',
+                        lifeTime: 3
+                    });
+                }
             });
         }
     },
@@ -523,6 +531,10 @@ export default {
         this.$bus.$off('menus-manager-move-item');
         this.$bus.$off('hide-menu-position-popup');
         this.$bus.$off('menus-manager-save-menu-positions');
+
+        if (this.autoRefreshInterval) {
+            clearInterval(this.autoRefreshInterval);
+        }
     }
 }
 </script>

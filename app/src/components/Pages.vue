@@ -452,6 +452,7 @@ export default {
     data () {
         return {
             appTheme: '',
+            autoRefreshInterval: null,
             bulkDropdownVisible: false,
             dataLoaded: false,
             filterValue: '',
@@ -642,6 +643,11 @@ export default {
         });
 
         this.checkPagesSupport();
+
+        // Auto-refresh every 30 seconds
+        this.autoRefreshInterval = setInterval(() => {
+            this.refreshPages(true);
+        }, 30000);
     },
     methods: {
         addNewPage (editorType) {
@@ -883,7 +889,7 @@ export default {
                 this.setFilter('');
             }, 0);
         },
-        refreshPages () {
+        refreshPages (silent = false) {
             if (this.isRefreshing) {
                 return;
             }
@@ -899,11 +905,13 @@ export default {
                 this.$store.commit('switchSite', result.data);
                 this.isRefreshing = false;
 
-                this.$bus.$emit('message-display', {
-                    message: this.$t('page.pagesRefreshed'),
-                    type: 'success',
-                    lifeTime: 3
-                });
+                if (!silent) {
+                    this.$bus.$emit('message-display', {
+                        message: this.$t('page.pagesRefreshed'),
+                        type: 'success',
+                        lifeTime: 3
+                    });
+                }
             });
         },
         ordering (field) {
@@ -1226,6 +1234,10 @@ export default {
         this.$bus.$off('site-loaded', this.whenSiteLoaded);
         this.$bus.$off('pages-filter-value-changed');
         this.$bus.$off('document-body-clicked', this.closeBulkDropdown);
+
+        if (this.autoRefreshInterval) {
+            clearInterval(this.autoRefreshInterval);
+        }
     }
 }
 </script>

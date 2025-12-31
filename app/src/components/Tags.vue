@@ -205,6 +205,7 @@ export default {
     },
     data: function() {
         return {
+            autoRefreshInterval: null,
             formAnimation: false,
             editorVisible: false,
             filterValue: '',
@@ -310,6 +311,11 @@ export default {
                 this.saveOrdering(order[0], order[1]);
             }
         });
+
+        // Auto-refresh every 30 seconds
+        this.autoRefreshInterval = setInterval(() => {
+            this.refreshTags(true);
+        }, 30000);
     },
     methods: {
         addTag () {
@@ -428,7 +434,7 @@ export default {
                 order: this.order
             });
         },
-        refreshTags () {
+        refreshTags (silent = false) {
             if (this.isRefreshing) {
                 return;
             }
@@ -444,11 +450,13 @@ export default {
                 this.$store.commit('switchSite', result.data);
                 this.isRefreshing = false;
 
-                this.$bus.$emit('message-display', {
-                    message: this.$t('tag.tagsRefreshed'),
-                    type: 'success',
-                    lifeTime: 3
-                });
+                if (!silent) {
+                    this.$bus.$emit('message-display', {
+                        message: this.$t('tag.tagsRefreshed'),
+                        type: 'success',
+                        lifeTime: 3
+                    });
+                }
             });
         }
     },
@@ -456,6 +464,10 @@ export default {
         this.$bus.$off('tags-filter-value-changed');
         this.$bus.$off('hide-tag-item-editor');
         this.$bus.$off('show-tag-item-editor');
+
+        if (this.autoRefreshInterval) {
+            clearInterval(this.autoRefreshInterval);
+        }
     }
 }
 </script>
