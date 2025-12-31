@@ -394,6 +394,20 @@
                         id="experimental-feature-app-file-manager-in-sidebar"
                         v-model="experimentalFileManagerInSidebar" />
                 </field>
+                <field
+                    id="experimental-feature-mcp-integration"
+                    :label="$t('settings.experimentalMcpIntegration')"
+                    :labelSeparated="false">
+                    <switcher
+                        slot="field"
+                        id="experimental-feature-mcp-integration"
+                        v-model="experimentalMcpIntegration" />
+                    <small
+                        slot="note"
+                        class="note">
+                        {{ $t('settings.experimentalMcpIntegrationDesc') }}
+                    </small>
+                </field>
             </fields-group>
 
             <p-footer>
@@ -454,6 +468,7 @@ export default {
             experimentalFeatureAppAutoBeautifySourceCode: false,
             experimentalFeatureAppFtpAlt: false,
             experimentalFileManagerInSidebar: false,
+            experimentalMcpIntegration: false,
             changeSitesLocationWithoutCopying: false,
             sitesLocationExists: false,
             backupsLocationExists: false,
@@ -600,6 +615,7 @@ export default {
         this.experimentalFeatureAppAutoBeautifySourceCode = this.$store.state.app.config.experimentalFeatureAppAutoBeautifySourceCode;
         this.experimentalFeatureAppFtpAlt = this.$store.state.app.config.experimentalFeatureAppFtpAlt;
         this.experimentalFileManagerInSidebar = this.$store.state.app.config.experimentalFileManagerInSidebar;
+        this.experimentalMcpIntegration = this.$store.state.app.config.experimentalMcpIntegration;
         this.uiZoomLevel = this.$store.state.app.config.uiZoomLevel;
         this.theme = this.getAppTheme();
 
@@ -671,6 +687,7 @@ export default {
                 experimentalFeatureAppAutoBeautifySourceCode: this.experimentalFeatureAppAutoBeautifySourceCode,
                 experimentalFeatureAppFtpAlt: this.experimentalFeatureAppFtpAlt,
                 experimentalFileManagerInSidebar: this.experimentalFileManagerInSidebar,
+                experimentalMcpIntegration: this.experimentalMcpIntegration,
                 changeSitesLocationWithoutCopying: this.changeSitesLocationWithoutCopying
             };
 

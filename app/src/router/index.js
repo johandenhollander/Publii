@@ -31,6 +31,7 @@ const AppLanguages = () => import('../components/AppLanguages');
 const AppPlugins = () => import('../components/AppPlugins');
 const ThemeSettings = () => import('../components/ThemeSettings');
 const NotificationsCenter = () => import('../components/NotificationsCenter');
+const McpActivity = () => import('../components/McpActivity');
 
 // Avoid NavigationDuplicated errors
 const originalPush = Router.prototype.push;
@@ -155,6 +156,10 @@ export default new Router({
                 {
                     path: 'tools/plugins/:pluginname',
                     component: ToolsPlugin
+                },
+                {
+                    path: 'mcp',
+                    component: McpActivity
                 }
             ]
         },

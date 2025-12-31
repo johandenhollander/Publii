@@ -3,7 +3,11 @@
         <li
             v-for="(item, index) in items"
             :key="'sidebar-item-' + index"
-            :class="{ 'sidebar-menu-item': true, 'is-active': item.icon === activeMenuItem }"
+            :class="{
+                'sidebar-menu-item': true,
+                'is-active': item.icon === activeMenuItem,
+                'has-mcp-status': item.isMcp
+            }"
             @click="setActiveMenuItem(item.icon)">
             <router-link :to="item.url">
                 <icon
@@ -11,6 +15,10 @@
                     customHeight="18"
                     :name="item.icon" />
                 {{ item.label }}
+                <span
+                    v-if="item.isMcp"
+                    :class="mcpStatusClass"
+                    class="mcp-status-dot"></span>
             </router-link>
         </li>
     </ul>
@@ -23,10 +31,24 @@ export default {
         let activeMenuItem = this.$route.path.endsWith('/pages/') ? 'pages' : 'posts';
 
         return {
-            activeMenuItem
+            activeMenuItem,
+            mcpStatus: {
+                active: false,
+                isStale: true,
+                processRunning: false
+            },
+            mcpPollInterval: null
         };
     },
     computed: {
+        mcpStatusClass () {
+            if (this.mcpStatus.active && this.mcpStatus.processRunning && !this.mcpStatus.isStale) {
+                return 'mcp-active';
+            } else if (this.mcpStatus.active && this.mcpStatus.isStale) {
+                return 'mcp-idle';
+            }
+            return 'mcp-inactive';
+        },
         items: function() {
             let siteName = this.$route.params.name;
             let menuItems = [{
@@ -75,6 +97,15 @@ export default {
                 });
             }
 
+            if (this.$store.state.app.config.experimentalMcpIntegration) {
+                menuItems.push({
+                    icon: 'mcp',
+                    label: 'MCP',
+                    url: '/site/' + siteName + '/mcp/',
+                    isMcp: true
+                });
+            }
+
             return menuItems;
         }
     },
@@ -102,6 +133,29 @@ export default {
     methods: {
         setActiveMenuItem: function(newValue) {
             this.activeMenuItem = newValue;
+        },
+        checkMcpStatus () {
+            if (!this.$store.state.app.config.experimentalMcpIntegration) {
+                return;
+            }
+            mainProcessAPI.send('app-mcp-cli-status');
+            mainProcessAPI.receiveOnce('app-mcp-cli-status-result', (status) => {
+                this.mcpStatus = status;
+            });
+        }
+    },
+    mounted () {
+        // Start polling MCP status if enabled
+        if (this.$store.state.app.config.experimentalMcpIntegration) {
+            this.checkMcpStatus();
+            this.mcpPollInterval = setInterval(() => {
+                this.checkMcpStatus();
+            }, 5000);
+        }
+    },
+    beforeDestroy () {
+        if (this.mcpPollInterval) {
+            clearInterval(this.mcpPollInterval);
         }
     }
 }
@@ -173,6 +227,37 @@ export default {
             margin-left: auto;
             padding: 2px;
         }
+    }
+}
+
+.mcp-status-dot {
+    border-radius: 50%;
+    display: inline-block;
+    height: 8px;
+    margin-left: auto;
+    width: 8px;
+
+    &.mcp-active {
+        background: #4ade80;
+        box-shadow: 0 0 6px #4ade80;
+        animation: mcp-pulse 2s infinite;
+    }
+
+    &.mcp-idle {
+        background: #fbbf24;
+    }
+
+    &.mcp-inactive {
+        background: #6b7280;
+    }
+}
+
+@keyframes mcp-pulse {
+    0%, 100% {
+        box-shadow: 0 0 6px #4ade80;
+    }
+    50% {
+        box-shadow: 0 0 12px #4ade80;
     }
 }
 
