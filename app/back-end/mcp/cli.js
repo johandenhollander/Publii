@@ -38,6 +38,24 @@ const MediaTools = require('./tools/media.js');
 // Setup Publii data directory
 const dataDir = path.join(os.homedir(), 'Documents', 'Publii');
 const sitesDir = path.join(dataDir, 'sites');
+const configDir = path.join(dataDir, 'config');
+
+// Load app config
+function loadAppConfig() {
+  const configPath = path.join(configDir, 'app-config.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    } catch (e) {
+      console.error('[MCP] Error loading app config:', e.message);
+    }
+  }
+  // Return defaults if config not found
+  return {
+    resizeEngine: 'sharp',  // Default to sharp for image processing
+    sitesLocation: sitesDir
+  };
+}
 
 // Load sites from disk
 function loadSites() {
@@ -73,6 +91,7 @@ const appInstance = {
   appDir: path.join(__dirname, '..', '..'),
   sitesDir: sitesDir,
   sites: loadSites(),
+  appConfig: loadAppConfig(),  // Required for Image class resizeEngine
   db: null,
   mainWindow: null  // No frontend in CLI mode
 };

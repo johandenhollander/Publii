@@ -27,6 +27,13 @@ async function saveFeaturedImage(sourcePath, appInstance, siteName, itemId, imag
     throw new Error(`Featured image file not found: ${sourcePath}`);
   }
 
+  // Ensure appConfig exists with resizeEngine (required by Image class)
+  if (!appInstance.appConfig) {
+    appInstance.appConfig = { resizeEngine: 'sharp' };
+  } else if (!appInstance.appConfig.resizeEngine) {
+    appInstance.appConfig.resizeEngine = 'sharp';
+  }
+
   // Create image data for Publii's Image class
   const imageData = {
     id: itemId,
