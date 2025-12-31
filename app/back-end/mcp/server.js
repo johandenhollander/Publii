@@ -20,6 +20,7 @@ const {
 
 // Import tool implementations
 const SiteTools = require('./tools/sites.js');
+const PostTools = require('./tools/posts.js');
 
 class PubliiMCPServer {
   /**
@@ -86,8 +87,8 @@ class PubliiMCPServer {
       console.log('[MCP] Listing tools');
 
       const tools = [
-        ...SiteTools.getToolDefinitions()
-        // More tools will be added here
+        ...SiteTools.getToolDefinitions(),
+        ...PostTools.getToolDefinitions()
       ];
 
       return { tools };
@@ -102,6 +103,10 @@ class PubliiMCPServer {
         // Route to appropriate tool handler
         if (name.startsWith('list_sites') || name.startsWith('get_site')) {
           return await SiteTools.handleToolCall(name, args, this.app);
+        }
+
+        if (name === 'list_posts' || name === 'get_post' || name === 'create_post' || name === 'delete_post') {
+          return await PostTools.handleToolCall(name, args, this.app);
         }
 
         throw new Error(`Unknown tool: ${name}`);
@@ -165,7 +170,7 @@ class PubliiMCPServer {
     return {
       running: this.isRunning,
       version: '1.0.0',
-      tools: this.isRunning ? ['list_sites'] : []
+      tools: this.isRunning ? ['list_sites', 'get_site_config', 'list_posts', 'get_post', 'create_post', 'delete_post'] : []
     };
   }
 
