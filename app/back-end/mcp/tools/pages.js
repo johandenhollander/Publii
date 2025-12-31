@@ -11,6 +11,7 @@ const DBUtils = require('../../helpers/db.utils.js');
 const Page = require('../../page.js');
 const slugify = require('../../helpers/slug.js');
 const normalizePath = require('normalize-path');
+const { saveFeaturedImage } = require('../helpers/featured-image.js');
 
 class PageTools {
   /**
@@ -335,47 +336,31 @@ class PageTools {
       // Pages have status with 'is-page' suffix
       const baseStatus = args.status || 'draft';
 
-      // Handle featured image if provided
+      // Handle featured image if provided - use Publii's Image class for responsive generation
       let featuredImage = '';
       let featuredImageFilename = '';
       let featuredImageData = false;
 
       if (args.featuredImage) {
-        // Validate source file exists
-        if (!fs.existsSync(args.featuredImage)) {
-          throw new Error(`Featured image file not found: ${args.featuredImage}`);
-        }
+        // Use Publii's Image class to save image with responsive versions
+        // For new pages, use 'temp' as ID - Page.save() will move files to final location
+        const imageResult = await saveFeaturedImage(
+          args.featuredImage,
+          appInstance,
+          args.site,
+          'temp',  // New pages use temp directory
+          'featuredImages'
+        );
 
-        featuredImageFilename = path.basename(args.featuredImage);
-
-        // Featured image data with alt, caption, credits
+        featuredImage = imageResult.featuredImage;
+        featuredImageFilename = imageResult.featuredImageFilename;
         featuredImageData = {
           alt: args.featuredImageAlt || '',
           caption: args.featuredImageCaption || '',
           credits: args.featuredImageCredits || ''
         };
 
-        // For new pages, we need to copy to temp directory first
-        // Publii will move it to the correct page ID directory after saving
-        const siteDir = path.join(appInstance.sitesDir, args.site);
-        const tempImagesDir = path.join(siteDir, 'input', 'media', 'posts', 'temp');
-
-        // Ensure temp directory exists
-        fs.ensureDirSync(tempImagesDir);
-
-        // Slugify the filename for consistency
-        const fileNameData = path.parse(featuredImageFilename);
-        const finalFileName = slugify(fileNameData.name, false, true) + fileNameData.ext;
-        const destPath = path.join(tempImagesDir, finalFileName);
-
-        // Copy the image file
-        fs.copySync(args.featuredImage, destPath);
-
-        // Set the featured image path (Publii expects the full path)
-        featuredImage = normalizePath(destPath);
-        featuredImageFilename = finalFileName;
-
-        console.error(`[MCP] Copied featured image to: ${destPath}`);
+        console.error(`[MCP] Saved featured image with responsive versions: ${featuredImageFilename}`);
       }
 
       const pageData = {
@@ -477,34 +462,25 @@ class PageTools {
           featuredImageFilename = '';
           featuredImageData = false;
           console.error('[MCP] Removing featured image');
-        } else if (fs.existsSync(args.featuredImage)) {
-          // New featured image provided
-          const siteDir = path.join(appInstance.sitesDir, args.site);
-          const pageImagesDir = path.join(siteDir, 'input', 'media', 'posts', args.id.toString());
+        } else {
+          // New featured image provided - use Publii's Image class for responsive generation
+          const imageResult = await saveFeaturedImage(
+            args.featuredImage,
+            appInstance,
+            args.site,
+            args.id,  // Use actual page ID for existing pages
+            'featuredImages'
+          );
 
-          // Ensure page images directory exists
-          fs.ensureDirSync(pageImagesDir);
-
-          // Slugify the filename
-          const originalFilename = path.basename(args.featuredImage);
-          const fileNameData = path.parse(originalFilename);
-          const finalFileName = slugify(fileNameData.name, false, true) + fileNameData.ext;
-          const destPath = path.join(pageImagesDir, finalFileName);
-
-          // Copy the image file
-          fs.copySync(args.featuredImage, destPath);
-
-          featuredImage = normalizePath(destPath);
-          featuredImageFilename = finalFileName;
+          featuredImage = imageResult.featuredImage;
+          featuredImageFilename = imageResult.featuredImageFilename;
           featuredImageData = {
             alt: args.featuredImageAlt || '',
             caption: args.featuredImageCaption || '',
             credits: args.featuredImageCredits || ''
           };
 
-          console.error(`[MCP] Updated featured image: ${destPath}`);
-        } else {
-          throw new Error(`Featured image file not found: ${args.featuredImage}`);
+          console.error(`[MCP] Updated featured image with responsive versions: ${featuredImageFilename}`);
         }
       } else if (args.featuredImageAlt !== undefined || args.featuredImageCaption !== undefined || args.featuredImageCredits !== undefined) {
         // Update just the featured image metadata without changing the image itself
