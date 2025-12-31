@@ -452,7 +452,6 @@ export default {
     data () {
         return {
             appTheme: '',
-            autoRefreshInterval: null,
             bulkDropdownVisible: false,
             dataLoaded: false,
             filterValue: '',
@@ -644,10 +643,10 @@ export default {
 
         this.checkPagesSupport();
 
-        // Auto-refresh every 30 seconds
-        this.autoRefreshInterval = setInterval(() => {
+        // Listen for MCP activity refresh events
+        this.$bus.$on('mcp-refresh-pages', () => {
             this.refreshPages(true);
-        }, 30000);
+        });
     },
     methods: {
         addNewPage (editorType) {
@@ -1234,10 +1233,7 @@ export default {
         this.$bus.$off('site-loaded', this.whenSiteLoaded);
         this.$bus.$off('pages-filter-value-changed');
         this.$bus.$off('document-body-clicked', this.closeBulkDropdown);
-
-        if (this.autoRefreshInterval) {
-            clearInterval(this.autoRefreshInterval);
-        }
+        this.$bus.$off('mcp-refresh-pages');
     }
 }
 </script>

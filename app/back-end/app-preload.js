@@ -132,7 +132,8 @@ contextBridge.exposeInMainWorld('mainProcessAPI', {
             'app-show-search-form',
             'block-editor-undo',
             'block-editor-redo',
-            'no-remote-files'
+            'no-remote-files',
+            'app-mcp-activity'
         ];
 
         if (validChannels.includes(channel)) {

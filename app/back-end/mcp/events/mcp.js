@@ -19,6 +19,74 @@ class MCPEvents {
     const statusFile = path.join(configDir, 'mcp-status.json');
     const activityLogFile = path.join(configDir, 'mcp-activity.json');
 
+    // Track last known activity count for change detection
+    let lastActivityCount = 0;
+    let activityWatcher = null;
+
+    // Initialize last activity count
+    try {
+      if (fs.existsSync(activityLogFile)) {
+        const data = JSON.parse(fs.readFileSync(activityLogFile, 'utf8'));
+        lastActivityCount = (data.entries || []).length;
+      }
+    } catch (e) {
+      // Ignore
+    }
+
+    /**
+     * Watch activity log for changes and notify frontend
+     */
+    const startActivityWatcher = () => {
+      if (activityWatcher) return;
+
+      // Ensure the config directory exists
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+
+      // Create empty activity file if it doesn't exist
+      if (!fs.existsSync(activityLogFile)) {
+        fs.writeFileSync(activityLogFile, JSON.stringify({ entries: [] }, null, 2));
+      }
+
+      try {
+        activityWatcher = fs.watch(activityLogFile, { persistent: false }, (eventType) => {
+          if (eventType === 'change') {
+            try {
+              const data = JSON.parse(fs.readFileSync(activityLogFile, 'utf8'));
+              const entries = data.entries || [];
+
+              // Check for new entries
+              if (entries.length > lastActivityCount) {
+                const newEntries = entries.slice(0, entries.length - lastActivityCount);
+                lastActivityCount = entries.length;
+
+                // Send each new entry to the frontend (most recent first)
+                for (const entry of newEntries) {
+                  if (appInstance.mainWindow && !appInstance.mainWindow.isDestroyed()) {
+                    appInstance.mainWindow.webContents.send('app-mcp-activity', entry);
+                    console.log('[MCP Events] New MCP activity:', entry.summary);
+                  }
+                }
+              } else if (entries.length < lastActivityCount) {
+                // Log was cleared
+                lastActivityCount = entries.length;
+              }
+            } catch (e) {
+              // Ignore parse errors (file might be mid-write)
+            }
+          }
+        });
+
+        console.log('[MCP Events] Activity watcher started');
+      } catch (e) {
+        console.error('[MCP Events] Failed to start activity watcher:', e);
+      }
+    };
+
+    // Start the watcher
+    startActivityWatcher();
+
     /**
      * Start MCP server
      *

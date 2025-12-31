@@ -215,7 +215,6 @@ export default {
     },
     data () {
         return {
-            autoRefreshInterval: null,
             editedID: false,
             editorVisible: false,
             filterValue: '',
@@ -273,10 +272,10 @@ export default {
             this.changeMenu(config.index, config.position, config.maxLevels);
         });
 
-        // Auto-refresh every 30 seconds
-        this.autoRefreshInterval = setInterval(() => {
+        // Listen for MCP activity refresh events
+        this.$bus.$on('mcp-refresh-menus', () => {
             this.refreshMenus(true);
-        }, 30000);
+        });
     },
     methods: {
         toggleMenu (index) {
@@ -531,10 +530,7 @@ export default {
         this.$bus.$off('menus-manager-move-item');
         this.$bus.$off('hide-menu-position-popup');
         this.$bus.$off('menus-manager-save-menu-positions');
-
-        if (this.autoRefreshInterval) {
-            clearInterval(this.autoRefreshInterval);
-        }
+        this.$bus.$off('mcp-refresh-menus');
     }
 }
 </script>

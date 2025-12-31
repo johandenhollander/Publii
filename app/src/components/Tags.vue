@@ -205,7 +205,6 @@ export default {
     },
     data: function() {
         return {
-            autoRefreshInterval: null,
             formAnimation: false,
             editorVisible: false,
             filterValue: '',
@@ -312,10 +311,10 @@ export default {
             }
         });
 
-        // Auto-refresh every 30 seconds
-        this.autoRefreshInterval = setInterval(() => {
+        // Listen for MCP activity refresh events
+        this.$bus.$on('mcp-refresh-tags', () => {
             this.refreshTags(true);
-        }, 30000);
+        });
     },
     methods: {
         addTag () {
@@ -464,10 +463,7 @@ export default {
         this.$bus.$off('tags-filter-value-changed');
         this.$bus.$off('hide-tag-item-editor');
         this.$bus.$off('show-tag-item-editor');
-
-        if (this.autoRefreshInterval) {
-            clearInterval(this.autoRefreshInterval);
-        }
+        this.$bus.$off('mcp-refresh-tags');
     }
 }
 </script>

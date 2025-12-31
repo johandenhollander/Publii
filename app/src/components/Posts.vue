@@ -456,7 +456,6 @@ export default {
     data () {
         return {
             appTheme: '',
-            autoRefreshInterval: null,
             bulkDropdownVisible: false,
             dataLoaded: false,
             filterValue: '',
@@ -595,10 +594,10 @@ export default {
             this.setFilter('is:trashed');
         }
 
-        // Auto-refresh every 30 seconds
-        this.autoRefreshInterval = setInterval(() => {
+        // Listen for MCP activity refresh events
+        this.$bus.$on('mcp-refresh-posts', () => {
             this.refreshPosts(true);
-        }, 30000);
+        });
     },
     methods: {
         addNewPost (editorType) {
@@ -925,10 +924,7 @@ export default {
         this.$bus.$off('site-loaded', this.whenSiteLoaded);
         this.$bus.$off('posts-filter-value-changed');
         this.$bus.$off('document-body-clicked', this.closeBulkDropdown);
-
-        if (this.autoRefreshInterval) {
-            clearInterval(this.autoRefreshInterval);
-        }
+        this.$bus.$off('mcp-refresh-posts');
     }
 }
 </script>

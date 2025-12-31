@@ -294,6 +294,26 @@ mainProcessAPI.receive('app-data-loaded', function (initialData) {
                 });
             }
 
+            // Listen for MCP activity events
+            mainProcessAPI.receive('app-mcp-activity', (activity) => {
+                // Show notification
+                const messageType = this.getMcpActivityMessageType(activity.tool);
+                this.$bus.$emit('message-display', {
+                    message: `MCP: ${activity.summary}`,
+                    type: messageType,
+                    lifeTime: 5
+                });
+
+                // Emit refresh event for relevant components after a delay
+                // This gives the MCP CLI time to release the database lock
+                const refreshEvent = this.getMcpRefreshEvent(activity.tool);
+                if (refreshEvent) {
+                    setTimeout(() => {
+                        this.$bus.$emit(refreshEvent, { silent: true, mcpActivity: activity });
+                    }, 500);
+                }
+            });
+
             // Object for plugins
             let pluginsAPI = {
                 saveConfigFile: (fileName, fileContent) => this.pluginsApiSaveConfigFile(fileName, fileContent),
@@ -311,6 +331,32 @@ mainProcessAPI.receive('app-data-loaded', function (initialData) {
             window.pluginsAPI = Object.freeze(pluginsAPI);
         },
         methods: {
+            getMcpActivityMessageType (tool) {
+                // Map MCP tools to message types
+                if (tool.includes('create') || tool.includes('upload')) {
+                    return 'success';
+                } else if (tool.includes('update') || tool.includes('set')) {
+                    return 'info';
+                } else if (tool.includes('delete')) {
+                    return 'warning';
+                }
+                return 'info';
+            },
+            getMcpRefreshEvent (tool) {
+                // Map MCP tools to refresh events
+                if (tool.includes('post')) {
+                    return 'mcp-refresh-posts';
+                } else if (tool.includes('page')) {
+                    return 'mcp-refresh-pages';
+                } else if (tool.includes('tag')) {
+                    return 'mcp-refresh-tags';
+                } else if (tool.includes('menu')) {
+                    return 'mcp-refresh-menus';
+                } else if (tool.includes('site') || tool.includes('config')) {
+                    return 'mcp-refresh-site';
+                }
+                return null;
+            },
             async setupAppTheme () {
                 let currentTheme = this.$store.state.app.theme;
 
