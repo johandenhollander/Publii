@@ -1,25 +1,24 @@
 /**
- * MCP Tools for Post Operations
+ * MCP Tools for Page Operations
  *
- * Wraps Publii's Post class for creating and managing posts
+ * Pages in Publii are posts with status containing 'is-page'
  */
 
 const path = require('path');
 const Database = require('node-sqlite3-wasm').Database;
 const DBUtils = require('../../helpers/db.utils.js');
-const Post = require('../../post.js');
-const Posts = require('../../posts.js');
+const Page = require('../../page.js');
 const slugify = require('../../helpers/slug.js');
 
-class PostTools {
+class PageTools {
   /**
    * Get tool definitions for MCP protocol
    */
   static getToolDefinitions() {
     return [
       {
-        name: 'list_posts',
-        description: 'List all posts for a site',
+        name: 'list_pages',
+        description: 'List all pages for a site',
         inputSchema: {
           type: 'object',
           properties: {
@@ -29,16 +28,16 @@ class PostTools {
             },
             status: {
               type: 'string',
-              description: 'Filter by status: published, draft, hidden, trashed',
-              enum: ['published', 'draft', 'hidden', 'trashed']
+              description: 'Filter by status: published, draft, hidden',
+              enum: ['published', 'draft', 'hidden']
             }
           },
           required: ['site']
         }
       },
       {
-        name: 'get_post',
-        description: 'Get a single post by ID',
+        name: 'get_page',
+        description: 'Get a single page by ID',
         inputSchema: {
           type: 'object',
           properties: {
@@ -48,15 +47,15 @@ class PostTools {
             },
             id: {
               type: 'number',
-              description: 'Post ID'
+              description: 'Page ID'
             }
           },
           required: ['site', 'id']
         }
       },
       {
-        name: 'create_post',
-        description: 'Create a new post with HTML content',
+        name: 'create_page',
+        description: 'Create a new page',
         inputSchema: {
           type: 'object',
           properties: {
@@ -66,11 +65,11 @@ class PostTools {
             },
             title: {
               type: 'string',
-              description: 'Post title'
+              description: 'Page title'
             },
             text: {
               type: 'string',
-              description: 'Post content in HTML'
+              description: 'Page content (HTML, blocks JSON, or markdown)'
             },
             slug: {
               type: 'string',
@@ -78,7 +77,7 @@ class PostTools {
             },
             status: {
               type: 'string',
-              description: 'Post status',
+              description: 'Page status',
               enum: ['published', 'draft', 'hidden'],
               default: 'draft'
             },
@@ -86,18 +85,13 @@ class PostTools {
               type: 'number',
               description: 'Author ID (defaults to 1)'
             },
-            tags: {
-              type: 'array',
-              items: { type: 'number' },
-              description: 'Array of tag IDs'
-            },
             template: {
               type: 'string',
               description: 'Template name (optional)'
             },
             editor: {
               type: 'string',
-              description: 'Editor type: tinymce (WYSIWYG), blockeditor, or markdown',
+              description: 'Editor type: tinymce, blockeditor, or markdown',
               enum: ['tinymce', 'blockeditor', 'markdown'],
               default: 'tinymce'
             }
@@ -106,8 +100,8 @@ class PostTools {
         }
       },
       {
-        name: 'update_post',
-        description: 'Update an existing post',
+        name: 'update_page',
+        description: 'Update an existing page',
         inputSchema: {
           type: 'object',
           properties: {
@@ -117,15 +111,15 @@ class PostTools {
             },
             id: {
               type: 'number',
-              description: 'Post ID to update'
+              description: 'Page ID to update'
             },
             title: {
               type: 'string',
-              description: 'New post title'
+              description: 'New page title'
             },
             text: {
               type: 'string',
-              description: 'New post content'
+              description: 'New page content'
             },
             slug: {
               type: 'string',
@@ -135,15 +129,6 @@ class PostTools {
               type: 'string',
               description: 'New status',
               enum: ['published', 'draft', 'hidden']
-            },
-            author: {
-              type: 'number',
-              description: 'New author ID'
-            },
-            tags: {
-              type: 'array',
-              items: { type: 'number' },
-              description: 'New array of tag IDs'
             },
             template: {
               type: 'string',
@@ -159,8 +144,8 @@ class PostTools {
         }
       },
       {
-        name: 'delete_post',
-        description: 'Delete a post by ID',
+        name: 'delete_page',
+        description: 'Delete a page by ID',
         inputSchema: {
           type: 'object',
           properties: {
@@ -170,7 +155,7 @@ class PostTools {
             },
             id: {
               type: 'number',
-              description: 'Post ID to delete'
+              description: 'Page ID to delete'
             }
           },
           required: ['site', 'id']
@@ -187,23 +172,23 @@ class PostTools {
     await this.ensureSiteConnection(args.site, appInstance);
 
     switch (toolName) {
-      case 'list_posts':
-        return await this.listPosts(args.site, args.status, appInstance);
+      case 'list_pages':
+        return await this.listPages(args.site, args.status, appInstance);
 
-      case 'get_post':
-        return await this.getPost(args.site, args.id, appInstance);
+      case 'get_page':
+        return await this.getPage(args.site, args.id, appInstance);
 
-      case 'create_post':
-        return await this.createPost(args, appInstance);
+      case 'create_page':
+        return await this.createPage(args, appInstance);
 
-      case 'update_post':
-        return await this.updatePost(args, appInstance);
+      case 'update_page':
+        return await this.updatePage(args, appInstance);
 
-      case 'delete_post':
-        return await this.deletePost(args.site, args.id, appInstance);
+      case 'delete_page':
+        return await this.deletePage(args.site, args.id, appInstance);
 
       default:
-        throw new Error(`Unknown post tool: ${toolName}`);
+        throw new Error(`Unknown page tool: ${toolName}`);
     }
   }
 
@@ -233,20 +218,22 @@ class PostTools {
   }
 
   /**
-   * List all posts for a site
+   * List all pages for a site
    */
-  static async listPosts(siteName, status, appInstance) {
+  static async listPages(siteName, status, appInstance) {
     try {
-      const posts = new Posts(appInstance, { site: siteName });
-      let allPosts = posts.load();
+      // Query pages directly - they have 'is-page' in status
+      let sql = "SELECT * FROM posts WHERE status LIKE '%is-page%'";
+      const params = {};
 
-      // Filter by status if specified
       if (status) {
-        allPosts = allPosts.filter(p => p.status === status);
+        sql += " AND status LIKE ?";
+        params.status = `%${status}%`;
       }
 
-      // Filter out pages (status contains 'is-page')
-      allPosts = allPosts.filter(p => !p.status.includes('is-page'));
+      sql += ' ORDER BY modified_at DESC';
+
+      const pages = appInstance.db.prepare(sql).all(status ? [`%${status}%`] : []);
 
       return {
         content: [{
@@ -254,8 +241,8 @@ class PostTools {
           text: JSON.stringify({
             success: true,
             site: siteName,
-            count: allPosts.length,
-            posts: allPosts.map(p => ({
+            count: pages.length,
+            pages: pages.map(p => ({
               id: p.id,
               title: p.title,
               slug: p.slug,
@@ -267,18 +254,18 @@ class PostTools {
         }]
       };
     } catch (error) {
-      console.error('[MCP] list_posts error:', error);
+      console.error('[MCP] list_pages error:', error);
       throw error;
     }
   }
 
   /**
-   * Get a single post
+   * Get a single page
    */
-  static async getPost(siteName, postId, appInstance) {
+  static async getPage(siteName, pageId, appInstance) {
     try {
-      const post = new Post(appInstance, { site: siteName, id: postId });
-      const result = post.load();
+      const page = new Page(appInstance, { site: siteName, id: pageId });
+      const result = page.load();
 
       return {
         content: [{
@@ -286,38 +273,38 @@ class PostTools {
           text: JSON.stringify({
             success: true,
             site: siteName,
-            post: result
+            page: result
           }, null, 2)
         }]
       };
     } catch (error) {
-      console.error('[MCP] get_post error:', error);
+      console.error('[MCP] get_page error:', error);
       throw error;
     }
   }
 
   /**
-   * Create a new post
+   * Create a new page
    */
-  static async createPost(args, appInstance) {
+  static async createPage(args, appInstance) {
     try {
       const now = Date.now();
+      const pageSlug = args.slug || slugify(args.title);
 
-      // Generate slug from title if not provided
-      const postSlug = args.slug || slugify(args.title);
+      // Pages have status with 'is-page' suffix
+      const baseStatus = args.status || 'draft';
 
-      const postData = {
+      const pageData = {
         site: args.site,
-        id: 0, // 0 = new post
+        id: 0, // 0 = new page
         title: args.title,
-        slug: postSlug,
+        slug: pageSlug,
         text: args.text,
         author: args.author || 1,
-        status: args.status || 'draft',
+        status: baseStatus,
         creationDate: now,
         modificationDate: now,
         template: args.template || '',
-        tags: args.tags || [],
         featuredImage: '',
         featuredImageFilename: '',
         featuredImageData: false,
@@ -326,21 +313,20 @@ class PostTools {
           metaDesc: '',
           metaRobots: 'index, follow',
           canonicalUrl: '',
-          mainTag: 0,
           editor: args.editor || 'tinymce'
         },
-        postViewSettings: {}
+        pageViewSettings: {}
       };
 
-      const post = new Post(appInstance, postData);
-      const result = post.save();
+      const page = new Page(appInstance, pageData);
+      const result = page.save();
 
-      console.log(`[MCP] Created post: ${args.title} (ID: ${result.postID})`);
+      console.log(`[MCP] Created page: ${args.title} (ID: ${result.pageID})`);
 
-      // Notify frontend to refresh posts list
+      // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
-        appInstance.mainWindow.webContents.send('app-post-saved', result);
-        console.log('[MCP] Frontend notified of new post');
+        appInstance.mainWindow.webContents.send('app-page-saved', result);
+        console.log('[MCP] Frontend notified of new page');
       }
 
       return {
@@ -348,47 +334,46 @@ class PostTools {
           type: 'text',
           text: JSON.stringify({
             success: true,
-            message: `Post "${args.title}" created successfully`,
-            postId: result.postID,
+            message: `Page "${args.title}" created successfully`,
+            pageId: result.pageID,
             site: args.site
           }, null, 2)
         }]
       };
     } catch (error) {
-      console.error('[MCP] create_post error:', error);
+      console.error('[MCP] create_page error:', error);
       throw error;
     }
   }
 
   /**
-   * Update an existing post
+   * Update an existing page
    */
-  static async updatePost(args, appInstance) {
+  static async updatePage(args, appInstance) {
     try {
-      // Load existing post
-      const post = new Post(appInstance, { site: args.site, id: args.id });
-      const existingData = post.load();
+      // Load existing page
+      const page = new Page(appInstance, { site: args.site, id: args.id });
+      const existingData = page.load();
 
-      if (!existingData || !existingData.posts || existingData.posts.length === 0) {
-        throw new Error(`Post ${args.id} not found`);
+      if (!existingData || !existingData.pages || existingData.pages.length === 0) {
+        throw new Error(`Page ${args.id} not found`);
       }
 
-      const existing = existingData.posts[0];
+      const existing = existingData.pages[0];
       const now = Date.now();
 
       // Merge existing data with updates
-      const postData = {
+      const pageData = {
         site: args.site,
         id: args.id,
         title: args.title !== undefined ? args.title : existing.title,
         slug: args.slug !== undefined ? args.slug : existing.slug,
         text: args.text !== undefined ? args.text : existing.text,
-        author: args.author !== undefined ? args.author : existing.author,
-        status: args.status !== undefined ? args.status : existing.status,
+        author: existing.author,
+        status: args.status !== undefined ? args.status : existing.status.replace(',is-page', ''),
         creationDate: existing.creationDate,
         modificationDate: now,
         template: args.template !== undefined ? args.template : existing.template,
-        tags: args.tags !== undefined ? args.tags : existing.tags,
         featuredImage: existing.featuredImage || '',
         featuredImageFilename: existing.featuredImageFilename || '',
         featuredImageData: existing.featuredImageData || false,
@@ -396,18 +381,18 @@ class PostTools {
           ...existing.additionalData,
           editor: args.editor !== undefined ? args.editor : (existing.additionalData?.editor || 'tinymce')
         },
-        postViewSettings: existing.postViewSettings || {}
+        pageViewSettings: existing.pageViewSettings || {}
       };
 
-      const updatedPost = new Post(appInstance, postData);
-      const result = updatedPost.save();
+      const updatedPage = new Page(appInstance, pageData);
+      const result = updatedPage.save();
 
-      console.log(`[MCP] Updated post: ${postData.title} (ID: ${args.id})`);
+      console.log(`[MCP] Updated page: ${pageData.title} (ID: ${args.id})`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
-        appInstance.mainWindow.webContents.send('app-post-saved', result);
-        console.log('[MCP] Frontend notified of updated post');
+        appInstance.mainWindow.webContents.send('app-page-saved', result);
+        console.log('[MCP] Frontend notified of updated page');
       }
 
       return {
@@ -415,43 +400,43 @@ class PostTools {
           type: 'text',
           text: JSON.stringify({
             success: true,
-            message: `Post "${postData.title}" updated successfully`,
-            postId: args.id,
+            message: `Page "${pageData.title}" updated successfully`,
+            pageId: args.id,
             site: args.site
           }, null, 2)
         }]
       };
     } catch (error) {
-      console.error('[MCP] update_post error:', error);
+      console.error('[MCP] update_page error:', error);
       throw error;
     }
   }
 
   /**
-   * Delete a post
+   * Delete a page
    */
-  static async deletePost(siteName, postId, appInstance) {
+  static async deletePage(siteName, pageId, appInstance) {
     try {
-      const post = new Post(appInstance, { site: siteName, id: postId });
-      const result = post.delete();
+      const page = new Page(appInstance, { site: siteName, id: pageId });
+      const result = page.delete();
 
-      console.log(`[MCP] Deleted post ID: ${postId}`);
+      console.log(`[MCP] Deleted page ID: ${pageId}`);
 
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
             success: true,
-            message: `Post ${postId} deleted successfully`,
+            message: `Page ${pageId} deleted successfully`,
             site: siteName
           }, null, 2)
         }]
       };
     } catch (error) {
-      console.error('[MCP] delete_post error:', error);
+      console.error('[MCP] delete_page error:', error);
       throw error;
     }
   }
 }
 
-module.exports = PostTools;
+module.exports = PageTools;

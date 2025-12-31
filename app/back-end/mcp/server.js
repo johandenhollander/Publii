@@ -21,6 +21,10 @@ const {
 // Import tool implementations
 const SiteTools = require('./tools/sites.js');
 const PostTools = require('./tools/posts.js');
+const PageTools = require('./tools/pages.js');
+const TagTools = require('./tools/tags.js');
+const MenuTools = require('./tools/menus.js');
+const MediaTools = require('./tools/media.js');
 
 class PubliiMCPServer {
   /**
@@ -88,7 +92,11 @@ class PubliiMCPServer {
 
       const tools = [
         ...SiteTools.getToolDefinitions(),
-        ...PostTools.getToolDefinitions()
+        ...PostTools.getToolDefinitions(),
+        ...PageTools.getToolDefinitions(),
+        ...TagTools.getToolDefinitions(),
+        ...MenuTools.getToolDefinitions(),
+        ...MediaTools.getToolDefinitions()
       ];
 
       return { tools };
@@ -105,8 +113,29 @@ class PubliiMCPServer {
           return await SiteTools.handleToolCall(name, args, this.app);
         }
 
-        if (name === 'list_posts' || name === 'get_post' || name === 'create_post' || name === 'delete_post') {
+        // Post tools
+        if (name === 'list_posts' || name === 'get_post' || name === 'create_post' || name === 'update_post' || name === 'delete_post') {
           return await PostTools.handleToolCall(name, args, this.app);
+        }
+
+        // Page tools
+        if (name === 'list_pages' || name === 'get_page' || name === 'create_page' || name === 'update_page' || name === 'delete_page') {
+          return await PageTools.handleToolCall(name, args, this.app);
+        }
+
+        // Tag tools
+        if (name === 'list_tags' || name === 'get_tag' || name === 'create_tag' || name === 'update_tag' || name === 'delete_tag') {
+          return await TagTools.handleToolCall(name, args, this.app);
+        }
+
+        // Menu tools
+        if (name === 'get_menu' || name === 'set_menu' || name === 'add_menu_item' || name === 'remove_menu_item' || name === 'clear_menu') {
+          return await MenuTools.handleToolCall(name, args, this.app);
+        }
+
+        // Media tools
+        if (name === 'list_media' || name === 'upload_media' || name === 'delete_media' || name === 'get_media_info') {
+          return await MediaTools.handleToolCall(name, args, this.app);
         }
 
         throw new Error(`Unknown tool: ${name}`);
@@ -167,10 +196,26 @@ class PubliiMCPServer {
    * Get server status
    */
   getStatus() {
+    const allTools = [
+      // Sites
+      'list_sites', 'get_site_config',
+      // Posts
+      'list_posts', 'get_post', 'create_post', 'update_post', 'delete_post',
+      // Pages
+      'list_pages', 'get_page', 'create_page', 'update_page', 'delete_page',
+      // Tags
+      'list_tags', 'get_tag', 'create_tag', 'update_tag', 'delete_tag',
+      // Menus
+      'get_menu', 'set_menu', 'add_menu_item', 'remove_menu_item', 'clear_menu',
+      // Media
+      'list_media', 'upload_media', 'delete_media', 'get_media_info'
+    ];
+
     return {
       running: this.isRunning,
       version: '1.0.0',
-      tools: this.isRunning ? ['list_sites', 'get_site_config', 'list_posts', 'get_post', 'create_post', 'delete_post'] : []
+      toolCount: allTools.length,
+      tools: this.isRunning ? allTools : []
     };
   }
 
