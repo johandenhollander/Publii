@@ -14,9 +14,10 @@ class MCPEvents {
   constructor(appInstance) {
     console.log('[MCP Events] Registering IPC handlers...');
 
-    // Path to MCP status file (written by CLI)
+    // Path to MCP status and activity files (written by CLI)
     const configDir = path.join(os.homedir(), 'Documents', 'Publii', 'config');
     const statusFile = path.join(configDir, 'mcp-status.json');
+    const activityLogFile = path.join(configDir, 'mcp-activity.json');
 
     /**
      * Start MCP server
@@ -110,7 +111,8 @@ class MCPEvents {
      * Get external MCP CLI status (from status file)
      *
      * This checks the status file written by the MCP CLI process
-     * (used by Claude Desktop) to show connection status in the UI.
+     * (used by Claude Desktop, Claude Code, etc.) to show connection status in the UI.
+     * Supports multiple concurrent MCP clients.
      *
      * Usage from frontend:
      *   mainProcessAPI.send('app-mcp-cli-status');
@@ -120,34 +122,115 @@ class MCPEvents {
       try {
         let status = {
           active: false,
+          clients: [],
+          totalToolCalls: 0,
+          // Legacy fields for backward compatibility
           pid: null,
           startedAt: null,
           lastActivity: null,
           toolCalls: 0,
-          isStale: true
+          isStale: true,
+          processRunning: false
         };
 
         if (fs.existsSync(statusFile)) {
           const data = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
-          status = { ...data };
 
-          // Check if status is stale (no activity in last 30 seconds)
-          if (data.lastActivity) {
-            const timeSinceActivity = Date.now() - data.lastActivity;
-            status.isStale = timeSinceActivity > 30000;
-            status.secondsSinceActivity = Math.floor(timeSinceActivity / 1000);
-          }
+          // Handle new multi-client format
+          if (Array.isArray(data.clients)) {
+            const now = Date.now();
+            const activeClients = [];
 
-          // Check if process is still running (on Unix-like systems)
-          if (data.pid && data.active) {
-            try {
-              process.kill(data.pid, 0); // Signal 0 = check if process exists
-              status.processRunning = true;
-            } catch (e) {
-              status.processRunning = false;
-              status.active = false; // Process died
+            for (const client of data.clients) {
+              const timeSinceActivity = now - (client.lastActivity || 0);
+              const isStale = timeSinceActivity > 30000;
+              let processRunning = false;
+
+              // Check if process is still running
+              if (client.pid && client.active) {
+                try {
+                  process.kill(client.pid, 0);
+                  processRunning = true;
+                } catch (e) {
+                  processRunning = false;
+                }
+              }
+
+              // Only include clients that are running or recently active
+              if (processRunning || timeSinceActivity < 60000) {
+                activeClients.push({
+                  ...client,
+                  isStale,
+                  processRunning,
+                  secondsSinceActivity: Math.floor(timeSinceActivity / 1000)
+                });
+              }
+            }
+
+            status.clients = activeClients;
+            status.active = activeClients.some(c => c.processRunning);
+            status.totalToolCalls = activeClients.reduce((sum, c) => sum + (c.toolCalls || 0), 0);
+
+            // Legacy fields - use most recent active client
+            if (activeClients.length > 0) {
+              const mostRecent = activeClients.reduce((a, b) =>
+                (b.lastActivity || 0) > (a.lastActivity || 0) ? b : a
+              );
+              status.pid = mostRecent.pid;
+              status.startedAt = mostRecent.startedAt;
+              status.lastActivity = mostRecent.lastActivity;
+              status.toolCalls = status.totalToolCalls;
+              status.isStale = mostRecent.isStale;
+              status.processRunning = mostRecent.processRunning;
+            }
+          } else {
+            // Handle legacy single-client format
+            status = { ...status, ...data };
+
+            if (data.lastActivity) {
+              const timeSinceActivity = Date.now() - data.lastActivity;
+              status.isStale = timeSinceActivity > 30000;
+              status.secondsSinceActivity = Math.floor(timeSinceActivity / 1000);
+            }
+
+            if (data.pid && data.active) {
+              try {
+                process.kill(data.pid, 0);
+                status.processRunning = true;
+              } catch (e) {
+                status.processRunning = false;
+                status.active = false;
+              }
+            }
+
+            // Convert to clients array for UI
+            if (data.active || data.pid) {
+              status.clients = [{
+                sessionId: 'legacy',
+                clientName: 'MCP Client',
+                pid: data.pid,
+                startedAt: data.startedAt,
+                lastActivity: data.lastActivity,
+                toolCalls: data.toolCalls || 0,
+                active: data.active,
+                isStale: status.isStale,
+                processRunning: status.processRunning,
+                secondsSinceActivity: status.secondsSinceActivity
+              }];
             }
           }
+        }
+
+        // Read activity log
+        try {
+          if (fs.existsSync(activityLogFile)) {
+            const activityData = JSON.parse(fs.readFileSync(activityLogFile, 'utf8'));
+            status.activityLog = activityData.entries || [];
+          } else {
+            status.activityLog = [];
+          }
+        } catch (e) {
+          status.activityLog = [];
         }
 
         event.sender.send('app-mcp-cli-status-result', status);
@@ -155,8 +238,28 @@ class MCPEvents {
         console.error('[MCP Events] Error reading MCP CLI status:', error);
         event.sender.send('app-mcp-cli-status-result', {
           active: false,
+          clients: [],
+          activityLog: [],
           error: error.message
         });
+      }
+    });
+
+    /**
+     * Clear MCP activity log
+     *
+     * Usage from frontend:
+     *   mainProcessAPI.send('app-mcp-clear-activity-log');
+     */
+    ipcMain.on('app-mcp-clear-activity-log', (event) => {
+      try {
+        if (fs.existsSync(activityLogFile)) {
+          fs.writeFileSync(activityLogFile, JSON.stringify({ entries: [] }, null, 2));
+        }
+        event.sender.send('app-mcp-activity-log-cleared', { success: true });
+      } catch (error) {
+        console.error('[MCP Events] Error clearing activity log:', error);
+        event.sender.send('app-mcp-activity-log-cleared', { success: false, error: error.message });
       }
     });
 

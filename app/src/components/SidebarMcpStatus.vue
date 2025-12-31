@@ -1,12 +1,11 @@
 <template>
     <div
-        v-if="showIndicator"
         :class="statusClasses"
         :title="statusTitle"
         @click="toggleDetails">
         <span class="mcp-status-dot"></span>
         <span class="mcp-status-text">MCP</span>
-        <span v-if="showDetails" class="mcp-status-details">
+        <span v-if="showDetails && statusDetails" class="mcp-status-details">
             {{ statusDetails }}
         </span>
     </div>
@@ -98,19 +97,20 @@ export default {
 
 .mcp-status {
     align-items: center;
-    background: rgba(0, 0, 0, 0.2);
+    background: rgba(0, 0, 0, 0.15);
     border-radius: 3px;
-    bottom: 12rem;
+    bottom: 24rem;
     color: var(--sidebar-link-color);
     cursor: pointer;
     display: flex;
     font-size: 1.1rem;
     gap: 0.5rem;
     left: $app-sidebar-margin;
-    opacity: 0.7;
+    opacity: 0.8;
     padding: 0.4rem 0.8rem;
     position: absolute;
     transition: all 0.2s ease;
+    z-index: 10;
 
     &:hover {
         opacity: 1;

@@ -688,7 +688,8 @@ class App {
                 themes: self.themes,
                 themesPath: self.themesPath,
                 dirs: self.dirPaths,
-                vendorPath: normalizePath(path.join(__dirname, '..', 'default-files', 'vendor').replace('app.asar', 'app.asar.unpacked'))
+                vendorPath: normalizePath(path.join(__dirname, '..', 'default-files', 'vendor').replace('app.asar', 'app.asar.unpacked')),
+                mcpCliPath: normalizePath(path.join(__dirname, 'mcp', 'cli.js').replace('app.asar', 'app.asar.unpacked'))
             };
 
             self.mainWindow.webContents.send('app-data-loaded', appData);
