@@ -22,5 +22,6 @@ module.exports = {
     ImportEvents: require('./import.js'),
     FileManagerEvents: require('./file-manager.js'),
     PluginEvents: require('./plugin.js'),
-    PluginsApiEvents: require('./plugins-api.js')
+    PluginsApiEvents: require('./plugins-api.js'),
+    MCPEvents: require('../mcp/events/mcp.js')
 };

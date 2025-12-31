@@ -141,6 +141,7 @@
     "license": "license.txt"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
     "node-gyp": "10.0.1"
   }
 }

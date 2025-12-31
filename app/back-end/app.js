@@ -33,7 +33,9 @@ const SiteConfigMigrator = require('./migrators/site-config.js');
 const defaultAstAppConfig = require('./../config/AST.app.config');
 const defaultAstCurrentSiteConfig = require('./../config/AST.currentSite.config');
 // Plugins packages
-const PluginsAPI = require('./modules/plugins/plugins-api.js')
+const PluginsAPI = require('./modules/plugins/plugins-api.js');
+// MCP Server
+const PubliiMCPServer = require('./mcp/server.js');
 
 /**
  * Main app class
@@ -63,6 +65,7 @@ class App {
         this.app.sitesDir = null;
         this.db = false;
         this.pluginsAPI = new PluginsAPI();
+        this.mcpServer = null; // MCP server instance (initialized later)
 
         /*
          * Run the app
@@ -763,10 +766,68 @@ class App {
     // Function used to restore current zoom level of window, because it is lost if zoom is changed after windo load
     setCurrentZoomLevel () {
         let zoom = parseFloat(this.appConfig.uiZoomLevel);
-        
+
         if (zoom && zoom > 0 && zoom <= 2.5) {
             this.mainWindow.webContents.setZoomFactor(zoom);
         }
+    }
+
+    /**
+     * MCP Server Methods
+     */
+
+    /**
+     * Start MCP server
+     * Called via IPC event: app-mcp-start
+     */
+    async startMCPServer() {
+        console.log('[App] Starting MCP server...');
+
+        if (!this.mcpServer) {
+            this.mcpServer = new PubliiMCPServer(this);
+        }
+
+        return await this.mcpServer.start();
+    }
+
+    /**
+     * Stop MCP server
+     * Called via IPC event: app-mcp-stop
+     */
+    async stopMCPServer() {
+        console.log('[App] Stopping MCP server...');
+
+        if (!this.mcpServer) {
+            return { success: true, message: 'MCP server not initialized' };
+        }
+
+        return await this.mcpServer.stop();
+    }
+
+    /**
+     * Restart MCP server
+     * Called via IPC event: app-mcp-restart
+     */
+    async restartMCPServer() {
+        console.log('[App] Restarting MCP server...');
+
+        if (!this.mcpServer) {
+            this.mcpServer = new PubliiMCPServer(this);
+        }
+
+        return await this.mcpServer.restart();
+    }
+
+    /**
+     * Get MCP server status
+     * Called via IPC event: app-mcp-status
+     */
+    getMCPServerStatus() {
+        if (!this.mcpServer) {
+            return { running: false, version: null, tools: [] };
+        }
+
+        return this.mcpServer.getStatus();
     }
 }
 
