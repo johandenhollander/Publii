@@ -9,6 +9,17 @@
             v-if="!showEmptyState"
             :title="$t('menu.menu')">
             <p-button
+                :onClick="refreshMenus"
+                slot="buttons"
+                type="outline icon"
+                icon="refresh"
+                :disabled="isRefreshing"
+                :title="$t('ui.refresh')">
+                <template v-if="!isRefreshing">{{ $t('ui.refresh') }}</template>
+                <template v-if="isRefreshing">{{ $t('ui.loading') }}</template>
+            </p-button>
+
+            <p-button
                 :onClick="showAddMenuForm"
                 slot="buttons"
                 type="primary icon"
@@ -207,6 +218,7 @@ export default {
             editedID: false,
             editorVisible: false,
             filterValue: '',
+            isRefreshing: false,
             selectedItems: [],
             openedItems: [],
             openedEditForms: [],
@@ -477,6 +489,29 @@ export default {
 
             Vue.nextTick(() => {
                 this.menuPositionPopupVisible = true;
+            });
+        },
+        refreshMenus () {
+            if (this.isRefreshing) {
+                return;
+            }
+
+            this.isRefreshing = true;
+
+            mainProcessAPI.send('app-site-reload', {
+                siteName: this.$store.state.currentSite.config.name
+            });
+
+            mainProcessAPI.receiveOnce('app-site-reloaded', (result) => {
+                this.$store.commit('setSiteConfig', result);
+                this.$store.commit('switchSite', result.data);
+                this.isRefreshing = false;
+
+                this.$bus.$emit('message-display', {
+                    message: this.$t('menu.menusRefreshed'),
+                    type: 'success',
+                    lifeTime: 3
+                });
             });
         }
     },

@@ -9,6 +9,17 @@
                 onChangeEventName="tags-filter-value-changed" />
 
             <p-button
+                :onClick="refreshTags"
+                slot="buttons"
+                type="outline icon"
+                icon="refresh"
+                :disabled="isRefreshing"
+                :title="$t('ui.refresh')">
+                <template v-if="!isRefreshing">{{ $t('ui.refresh') }}</template>
+                <template v-if="isRefreshing">{{ $t('ui.loading') }}</template>
+            </p-button>
+
+            <p-button
                 :onClick="addTag"
                 slot="buttons"
                 type="primary icon"
@@ -197,6 +208,7 @@ export default {
             formAnimation: false,
             editorVisible: false,
             filterValue: '',
+            isRefreshing: false,
             orderBy: this.$store.state.ordering.tags.orderBy,
             order: this.$store.state.ordering.tags.order,
             selectedItems: []
@@ -414,6 +426,29 @@ export default {
                 type: 'tags',
                 orderBy: this.orderBy,
                 order: this.order
+            });
+        },
+        refreshTags () {
+            if (this.isRefreshing) {
+                return;
+            }
+
+            this.isRefreshing = true;
+
+            mainProcessAPI.send('app-site-reload', {
+                siteName: this.$store.state.currentSite.config.name
+            });
+
+            mainProcessAPI.receiveOnce('app-site-reloaded', (result) => {
+                this.$store.commit('setSiteConfig', result);
+                this.$store.commit('switchSite', result.data);
+                this.isRefreshing = false;
+
+                this.$bus.$emit('message-display', {
+                    message: this.$t('tag.tagsRefreshed'),
+                    type: 'success',
+                    lifeTime: 3
+                });
             });
         }
     },
