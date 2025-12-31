@@ -134,7 +134,7 @@ class PubliiMCPServer {
         }
 
         // Media tools
-        if (name === 'list_media' || name === 'upload_media' || name === 'delete_media' || name === 'get_media_info') {
+        if (name === 'list_media' || name === 'upload_image' || name === 'upload_file' || name === 'delete_media' || name === 'get_media_info') {
           return await MediaTools.handleToolCall(name, args, this.app);
         }
 
@@ -208,7 +208,7 @@ class PubliiMCPServer {
       // Menus
       'get_menu', 'set_menu', 'add_menu_item', 'remove_menu_item', 'clear_menu',
       // Media
-      'list_media', 'upload_media', 'delete_media', 'get_media_info'
+      'list_media', 'upload_image', 'upload_file', 'delete_media', 'get_media_info'
     ];
 
     return {

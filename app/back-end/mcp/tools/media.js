@@ -1,11 +1,16 @@
 /**
  * MCP Tools for Media Operations
  *
- * Manages media files (images, PDFs, etc.)
+ * Uses Publii's native Image class for proper handling of:
+ * - Responsive images
+ * - Gallery thumbnails
+ * - Proper file naming (slug)
  */
 
 const path = require('path');
 const fs = require('fs');
+const sizeOf = require('image-size');
+const normalizePath = require('normalize-path');
 
 class MediaTools {
   /**
@@ -25,17 +30,49 @@ class MediaTools {
             },
             type: {
               type: 'string',
-              description: 'Media type: posts, website, files',
-              enum: ['posts', 'website', 'files'],
+              description: 'Media type: posts, website, files, gallery',
+              enum: ['posts', 'website', 'files', 'gallery'],
               default: 'posts'
+            },
+            postId: {
+              type: 'number',
+              description: 'Post ID (required for gallery type)'
             }
           },
           required: ['site']
         }
       },
       {
-        name: 'upload_media',
-        description: 'Copy a media file to the site',
+        name: 'upload_image',
+        description: 'Upload an image using Publii\'s native image handling (with responsive images and thumbnails)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            site: {
+              type: 'string',
+              description: 'Site name'
+            },
+            sourcePath: {
+              type: 'string',
+              description: 'Absolute path to the source image'
+            },
+            postId: {
+              type: 'number',
+              description: 'Post ID to associate the image with (0 for temp)'
+            },
+            imageType: {
+              type: 'string',
+              description: 'Image type: contentImages, galleryImages, optionImages',
+              enum: ['contentImages', 'galleryImages', 'optionImages'],
+              default: 'contentImages'
+            }
+          },
+          required: ['site', 'sourcePath']
+        }
+      },
+      {
+        name: 'upload_file',
+        description: 'Upload a non-image file (PDF, etc.) to the site',
         inputSchema: {
           type: 'object',
           properties: {
@@ -49,13 +86,9 @@ class MediaTools {
             },
             type: {
               type: 'string',
-              description: 'Media type: posts, website, files',
-              enum: ['posts', 'website', 'files'],
-              default: 'posts'
-            },
-            filename: {
-              type: 'string',
-              description: 'Destination filename (uses source filename if not provided)'
+              description: 'File type: website, files',
+              enum: ['website', 'files'],
+              default: 'files'
             }
           },
           required: ['site', 'sourcePath']
@@ -81,7 +114,7 @@ class MediaTools {
       },
       {
         name: 'get_media_info',
-        description: 'Get information about a media file',
+        description: 'Get information about a media file including dimensions',
         inputSchema: {
           type: 'object',
           properties: {
@@ -106,10 +139,13 @@ class MediaTools {
   static async handleToolCall(toolName, args, appInstance) {
     switch (toolName) {
       case 'list_media':
-        return await this.listMedia(args.site, args.type, appInstance);
+        return await this.listMedia(args.site, args.type, args.postId, appInstance);
 
-      case 'upload_media':
-        return await this.uploadMedia(args, appInstance);
+      case 'upload_image':
+        return await this.uploadImage(args, appInstance);
+
+      case 'upload_file':
+        return await this.uploadFile(args, appInstance);
 
       case 'delete_media':
         return await this.deleteMedia(args.site, args.relativePath, appInstance);
@@ -123,19 +159,18 @@ class MediaTools {
   }
 
   /**
-   * Get media directory path
-   */
-  static getMediaPath(siteName, type, appInstance) {
-    return path.join(appInstance.sitesDir, siteName, 'input', 'media', type || 'posts');
-  }
-
-  /**
    * List media files
    */
-  static async listMedia(siteName, type, appInstance) {
+  static async listMedia(siteName, type, postId, appInstance) {
     try {
       const mediaType = type || 'posts';
-      const mediaDir = this.getMediaPath(siteName, mediaType, appInstance);
+      let mediaDir;
+
+      if (mediaType === 'gallery' && postId) {
+        mediaDir = path.join(appInstance.sitesDir, siteName, 'input', 'media', 'posts', postId.toString(), 'gallery');
+      } else {
+        mediaDir = path.join(appInstance.sitesDir, siteName, 'input', 'media', mediaType);
+      }
 
       if (!fs.existsSync(mediaDir)) {
         return {
@@ -166,12 +201,31 @@ class MediaTools {
             scanDir(fullPath, relativePath);
           } else {
             const stats = fs.statSync(fullPath);
-            files.push({
+            const ext = path.extname(entry.name).toLowerCase();
+            const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+
+            const fileInfo = {
               path: `media/${mediaType}/${relativePath}`,
+              fullPath: fullPath,
               filename: entry.name,
               size: stats.size,
-              modified: stats.mtime.toISOString()
-            });
+              modified: stats.mtime.toISOString(),
+              isImage: isImage
+            };
+
+            // Get dimensions for images
+            if (isImage) {
+              try {
+                const dimensions = sizeOf(fullPath);
+                fileInfo.width = dimensions.width;
+                fileInfo.height = dimensions.height;
+                fileInfo.dimensions = `${dimensions.width}x${dimensions.height}`;
+              } catch (e) {
+                // Ignore dimension errors
+              }
+            }
+
+            files.push(fileInfo);
           }
         }
       };
@@ -197,11 +251,109 @@ class MediaTools {
   }
 
   /**
-   * Upload (copy) a media file
+   * Upload image to site media directory
+   * Returns file:// URL compatible with Publii's block editor
+   * Note: Responsive images are generated by Publii during preview/publish
    */
-  static async uploadMedia(args, appInstance) {
+  static async uploadImage(args, appInstance) {
     try {
-      const { site, sourcePath, type = 'posts', filename } = args;
+      const { site, sourcePath, postId = 0, imageType = 'contentImages' } = args;
+
+      // Verify source file exists
+      if (!fs.existsSync(sourcePath)) {
+        throw new Error(`Source file not found: ${sourcePath}`);
+      }
+
+      // Determine destination directory based on imageType
+      let destDir;
+      const idStr = postId === 0 ? 'temp' : postId.toString();
+
+      if (imageType === 'galleryImages') {
+        destDir = path.join(appInstance.sitesDir, site, 'input', 'media', 'posts', idStr, 'gallery');
+      } else if (imageType === 'optionImages') {
+        destDir = path.join(appInstance.sitesDir, site, 'input', 'media', 'website');
+      } else {
+        destDir = path.join(appInstance.sitesDir, site, 'input', 'media', 'posts', idStr);
+      }
+
+      // Create directory if it doesn't exist
+      if (!fs.existsSync(destDir)) {
+        fs.mkdirSync(destDir, { recursive: true });
+      }
+
+      // Also create responsive directory for future use
+      const responsiveDir = path.join(destDir, 'responsive');
+      if (!fs.existsSync(responsiveDir)) {
+        fs.mkdirSync(responsiveDir, { recursive: true });
+      }
+
+      // Generate clean filename (similar to Publii's slug function)
+      const originalName = path.basename(sourcePath);
+      const ext = path.extname(originalName);
+      const baseName = path.basename(originalName, ext)
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+      const destFilename = baseName + ext.toLowerCase();
+      const destPath = path.join(destDir, destFilename);
+
+      // Copy file
+      fs.copyFileSync(sourcePath, destPath);
+
+      // Get dimensions
+      let width = 0, height = 0;
+      try {
+        const dimensions = sizeOf(destPath);
+        width = dimensions.width || 0;
+        height = dimensions.height || 0;
+      } catch (e) {
+        // Ignore dimension errors
+      }
+
+      // Create file:// URL (Publii format)
+      const fileUrl = 'file://' + normalizePath(destPath);
+
+      console.log(`[MCP] Uploaded image: ${fileUrl} (${width}x${height})`);
+
+      // Notify frontend if running in Publii
+      if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
+        appInstance.mainWindow.webContents.send('app-image-uploaded', {
+          url: fileUrl,
+          postId: postId
+        });
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: `Image uploaded successfully`,
+            url: fileUrl,
+            path: destPath,
+            filename: destFilename,
+            dimensions: `${width}x${height}`,
+            width: width,
+            height: height,
+            site: site,
+            postId: postId,
+            imageType: imageType
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error('[MCP] upload_image error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Upload a non-image file (PDF, etc.)
+   */
+  static async uploadFile(args, appInstance) {
+    try {
+      const { site, sourcePath, type = 'files' } = args;
 
       // Verify source file exists
       if (!fs.existsSync(sourcePath)) {
@@ -209,7 +361,7 @@ class MediaTools {
       }
 
       // Get destination directory
-      const mediaDir = this.getMediaPath(site, type, appInstance);
+      const mediaDir = path.join(appInstance.sitesDir, site, 'input', 'media', type);
 
       // Create directory if it doesn't exist
       if (!fs.existsSync(mediaDir)) {
@@ -217,7 +369,7 @@ class MediaTools {
       }
 
       // Determine destination filename
-      const destFilename = filename || path.basename(sourcePath);
+      const destFilename = path.basename(sourcePath);
       const destPath = path.join(mediaDir, destFilename);
 
       // Copy file
@@ -225,13 +377,9 @@ class MediaTools {
 
       const stats = fs.statSync(destPath);
       const relativePath = `media/${type}/${destFilename}`;
+      const fileUrl = 'file://' + normalizePath(destPath);
 
-      console.log(`[MCP] Uploaded media: ${relativePath}`);
-
-      // Notify frontend
-      if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
-        appInstance.mainWindow.webContents.send('app-file-manager-uploaded', { path: relativePath });
-      }
+      console.log(`[MCP] Uploaded file: ${relativePath}`);
 
       return {
         content: [{
@@ -240,6 +388,7 @@ class MediaTools {
             success: true,
             message: `File uploaded to ${relativePath}`,
             path: relativePath,
+            url: fileUrl,
             filename: destFilename,
             size: stats.size,
             site: site
@@ -247,7 +396,7 @@ class MediaTools {
         }]
       };
     } catch (error) {
-      console.error('[MCP] upload_media error:', error);
+      console.error('[MCP] upload_file error:', error);
       throw error;
     }
   }
@@ -289,7 +438,7 @@ class MediaTools {
   }
 
   /**
-   * Get media file information
+   * Get media file information including dimensions
    */
   static async getMediaInfo(siteName, relativePath, appInstance) {
     try {
@@ -301,17 +450,32 @@ class MediaTools {
 
       const stats = fs.statSync(fullPath);
       const ext = path.extname(relativePath).toLowerCase();
+      const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'].includes(ext);
 
       const info = {
         path: relativePath,
+        fullPath: fullPath,
+        url: 'file://' + normalizePath(fullPath),
         filename: path.basename(relativePath),
         extension: ext,
         size: stats.size,
         created: stats.birthtime.toISOString(),
         modified: stats.mtime.toISOString(),
-        isImage: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'].includes(ext),
+        isImage: isImage,
         isPdf: ext === '.pdf'
       };
+
+      // Get dimensions for images
+      if (isImage && ext !== '.svg') {
+        try {
+          const dimensions = sizeOf(fullPath);
+          info.width = dimensions.width;
+          info.height = dimensions.height;
+          info.dimensions = `${dimensions.width}x${dimensions.height}`;
+        } catch (e) {
+          // Ignore dimension errors
+        }
+      }
 
       return {
         content: [{
