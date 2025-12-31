@@ -53,8 +53,11 @@ async function saveFeaturedImage(sourcePath, appInstance, siteName, itemId, imag
   // Create Image instance using Publii's class
   const image = new Image(appInstance, imageData);
 
+  // Store original itemId since Image class converts 'temp' to NaN via parseInt
+  const originalItemId = itemId;
+
   // Save image to correct location based on type
-  const result = await saveImageToDirectory(image, imageType);
+  const result = await saveImageToDirectory(image, imageType, originalItemId);
 
   if (!result || !result.newPath) {
     throw new Error('Failed to save image');
@@ -83,11 +86,15 @@ async function saveFeaturedImage(sourcePath, appInstance, siteName, itemId, imag
 
 /**
  * Save image to the correct directory based on image type
+ * @param {Object} imageInstance - Image instance with siteDir and path
+ * @param {string} imageType - Type of image (featuredImages, contentImages, etc.)
+ * @param {number|string} originalItemId - Original item ID (preserves 'temp' or actual ID)
  */
-function saveImageToDirectory(imageInstance, imageType) {
+function saveImageToDirectory(imageInstance, imageType, originalItemId) {
   return new Promise((resolve, reject) => {
     try {
-      const idStr = imageInstance.id.toString();
+      // Use originalItemId to avoid NaN from parseInt('temp')
+      const idStr = originalItemId.toString();
       let dirPath;
       let responsiveDirPath;
 
