@@ -101,7 +101,7 @@ class PostTools {
             },
             editor: {
               type: 'string',
-              description: 'Editor format for content. Use "tinymce" for HTML, "blockeditor" for JSON blocks, "markdown" for markdown',
+              description: 'Editor format for content. Use "tinymce" for HTML (recommended), "blockeditor" for Publii block JSON, "markdown" for plain markdown. NOTE: blockeditor requires Publii-specific JSON array format: [{"type":"publii-paragraph","content":"<p>text</p>","config":{"textAlign":"left","advanced":{"id":"","cssClasses":"","style":""}}}]. Block types: publii-paragraph, publii-header, publii-list, publii-quote, publii-code, publii-image, publii-gallery, publii-embed, publii-html, publii-separator, publii-readmore, publii-toc. For simplicity, prefer tinymce with HTML content.',
               enum: ['tinymce', 'blockeditor', 'markdown'],
               default: 'tinymce'
             },
@@ -171,7 +171,7 @@ class PostTools {
             },
             editor: {
               type: 'string',
-              description: 'Editor type',
+              description: 'Editor type. WARNING: Changing editor type requires content in matching format. See create_post for blockeditor format details.',
               enum: ['tinymce', 'blockeditor', 'markdown']
             },
             featuredImage: {
