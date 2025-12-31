@@ -12,6 +12,17 @@
                 :placeholder="$t('page.filterOrSearchPages')"
                 onChangeEventName="pages-filter-value-changed" />
 
+            <p-button
+                :onClick="refreshPages"
+                slot="buttons"
+                type="outline icon"
+                icon="refresh"
+                :disabled="isRefreshing"
+                :title="$t('ui.refresh')">
+                <template v-if="!isRefreshing">{{ $t('ui.refresh') }}</template>
+                <template v-if="isRefreshing">{{ $t('ui.loading') }}</template>
+            </p-button>
+
             <btn-dropdown
                 slot="buttons"
                 buttonColor="green"
@@ -444,6 +455,7 @@ export default {
             bulkDropdownVisible: false,
             dataLoaded: false,
             filterValue: '',
+            isRefreshing: false,
             selectedItems: [],
             pagesHierarchy: null,
             hierarchyMode: false,
@@ -870,6 +882,29 @@ export default {
             setTimeout(() => {
                 this.setFilter('');
             }, 0);
+        },
+        refreshPages () {
+            if (this.isRefreshing) {
+                return;
+            }
+
+            this.isRefreshing = true;
+
+            mainProcessAPI.send('app-site-reload', {
+                siteName: this.$store.state.currentSite.config.name
+            });
+
+            mainProcessAPI.receiveOnce('app-site-reloaded', (result) => {
+                this.$store.commit('setSiteConfig', result);
+                this.$store.commit('switchSite', result.data);
+                this.isRefreshing = false;
+
+                this.$bus.$emit('message-display', {
+                    message: this.$t('page.pagesRefreshed'),
+                    type: 'success',
+                    lifeTime: 3
+                });
+            });
         },
         ordering (field) {
             if (field !== this.orderBy) {

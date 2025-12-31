@@ -551,7 +551,8 @@
         "trashed": "Trashed",
         "unselectItem": "Unselect",
         "updatedOn": "Updated on",
-        "url": "URL"
+        "url": "URL",
+        "pagesRefreshed": "Pages list has been refreshed"
     },
     "plugins": {
         "addPluginSuccessMessage": "Plugin has been added",
@@ -646,7 +647,8 @@
         "uniqueWords": "Unique words",
         "updatedOn": "Updated on",
         "url": "URL",
-        "words": "Words"
+        "words": "Words",
+        "postsRefreshed": "Posts list has been refreshed"
     },
     "publii": {
         "aboutPublii": "About Publii",
@@ -1483,6 +1485,7 @@
         "publishAndClose": "Publish and close",
         "publishPost": "Publish post",
         "reloadFile": "Reload file",
+        "refresh": "Refresh",
         "renderFrontPageOnly": "Render homepage only",
         "renderFullWebsite": "Render full website",
         "reportBugInSupportDesk": "Report a bug via our forum",
