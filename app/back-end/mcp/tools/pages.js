@@ -196,13 +196,20 @@ class PageTools {
    * Ensure database connection to the specified site
    */
   static async ensureSiteConnection(siteName, appInstance) {
-    const siteDir = path.join(appInstance.sitesDir, siteName);
-    const dbPath = path.join(siteDir, 'input', 'db.sqlite');
+    // Validate site name is provided
+    if (!siteName || typeof siteName !== 'string') {
+      const availableSites = Object.keys(appInstance.sites || {}).join(', ');
+      throw new Error(`Site name is required. Available sites: ${availableSites || 'none found'}. Use list_sites tool first.`);
+    }
 
     // Check if site exists
-    if (!appInstance.sites[siteName]) {
-      throw new Error(`Site not found: ${siteName}`);
+    if (!appInstance.sites || !appInstance.sites[siteName]) {
+      const availableSites = Object.keys(appInstance.sites || {}).join(', ');
+      throw new Error(`Site "${siteName}" not found. Available sites: ${availableSites || 'none'}. Use list_sites tool first.`);
     }
+
+    const siteDir = path.join(appInstance.sitesDir, siteName);
+    const dbPath = path.join(siteDir, 'input', 'db.sqlite');
 
     // Connect to site database
     if (appInstance.db) {

@@ -13,7 +13,7 @@ class SiteTools {
     return [
       {
         name: 'list_sites',
-        description: 'List all Publii sites with their configuration',
+        description: 'IMPORTANT: Call this FIRST to get available Publii site names. Returns site directory names needed for all other tools. No parameters required.',
         inputSchema: {
           type: 'object',
           properties: {},
@@ -22,13 +22,13 @@ class SiteTools {
       },
       {
         name: 'get_site_config',
-        description: 'Get detailed configuration for a specific site',
+        description: 'Get detailed configuration for a specific site including theme, domain, and settings.',
         inputSchema: {
           type: 'object',
           properties: {
             site: {
               type: 'string',
-              description: 'Site name (catalog name, not display name)'
+              description: 'Site directory name from list_sites (the "name" field, not "displayName"). Example: "ndh-allround"'
             }
           },
           required: ['site']

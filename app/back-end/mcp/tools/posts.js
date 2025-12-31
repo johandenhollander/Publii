@@ -19,17 +19,17 @@ class PostTools {
     return [
       {
         name: 'list_posts',
-        description: 'List all posts for a site',
+        description: 'List all posts for a Publii site. Use list_sites first to get available site names.',
         inputSchema: {
           type: 'object',
           properties: {
             site: {
               type: 'string',
-              description: 'Site name (catalog name)'
+              description: 'Site directory name (use list_sites to see available sites). Example: "my-blog" or "ndh-allround"'
             },
             status: {
               type: 'string',
-              description: 'Filter by status: published, draft, hidden, trashed',
+              description: 'Optional filter by status',
               enum: ['published', 'draft', 'hidden', 'trashed']
             }
           },
@@ -38,17 +38,17 @@ class PostTools {
       },
       {
         name: 'get_post',
-        description: 'Get a single post by ID',
+        description: 'Get a single post by its numeric ID. Use list_posts first to find post IDs.',
         inputSchema: {
           type: 'object',
           properties: {
             site: {
               type: 'string',
-              description: 'Site name'
+              description: 'Site directory name (use list_sites to see available sites)'
             },
             id: {
-              type: 'number',
-              description: 'Post ID'
+              type: 'integer',
+              description: 'Numeric post ID (use list_posts to find IDs)'
             }
           },
           required: ['site', 'id']
@@ -56,48 +56,49 @@ class PostTools {
       },
       {
         name: 'create_post',
-        description: 'Create a new post with HTML content',
+        description: 'Create a new blog post. Requires site name, title, and content. Use list_sites first to get the site name.',
         inputSchema: {
           type: 'object',
           properties: {
             site: {
               type: 'string',
-              description: 'Site name'
+              description: 'Site directory name (REQUIRED - use list_sites to see available sites). Example: "ndh-allround"'
             },
             title: {
               type: 'string',
-              description: 'Post title'
+              description: 'Post title (REQUIRED). Example: "My First Blog Post"'
             },
             text: {
               type: 'string',
-              description: 'Post content in HTML'
+              description: 'Post content as HTML (REQUIRED). Example: "<p>Hello world!</p><h2>Section</h2><p>More content...</p>"'
             },
             slug: {
               type: 'string',
-              description: 'URL slug (auto-generated if not provided)'
+              description: 'URL-friendly slug. Auto-generated from title if not provided. Example: "my-first-blog-post"'
             },
             status: {
               type: 'string',
-              description: 'Post status',
+              description: 'Publication status. Defaults to "draft"',
               enum: ['published', 'draft', 'hidden'],
               default: 'draft'
             },
             author: {
-              type: 'number',
-              description: 'Author ID (defaults to 1)'
+              type: 'integer',
+              description: 'Author ID number. Defaults to 1 (primary author)',
+              default: 1
             },
             tags: {
               type: 'array',
-              items: { type: 'number' },
-              description: 'Array of tag IDs'
+              items: { type: 'integer' },
+              description: 'Array of tag ID numbers. Use list_tags to find tag IDs. Example: [1, 3, 5]'
             },
             template: {
               type: 'string',
-              description: 'Template name (optional)'
+              description: 'Custom template name. Leave empty for default template'
             },
             editor: {
               type: 'string',
-              description: 'Editor type: tinymce (WYSIWYG), blockeditor, or markdown',
+              description: 'Editor format for content. Use "tinymce" for HTML, "blockeditor" for JSON blocks, "markdown" for markdown',
               enum: ['tinymce', 'blockeditor', 'markdown'],
               default: 'tinymce'
             }
@@ -211,13 +212,20 @@ class PostTools {
    * Ensure database connection to the specified site
    */
   static async ensureSiteConnection(siteName, appInstance) {
-    const siteDir = path.join(appInstance.sitesDir, siteName);
-    const dbPath = path.join(siteDir, 'input', 'db.sqlite');
+    // Validate site name is provided
+    if (!siteName || typeof siteName !== 'string') {
+      const availableSites = Object.keys(appInstance.sites || {}).join(', ');
+      throw new Error(`Site name is required. Available sites: ${availableSites || 'none found'}. Use list_sites tool first.`);
+    }
 
     // Check if site exists
-    if (!appInstance.sites[siteName]) {
-      throw new Error(`Site not found: ${siteName}`);
+    if (!appInstance.sites || !appInstance.sites[siteName]) {
+      const availableSites = Object.keys(appInstance.sites || {}).join(', ');
+      throw new Error(`Site "${siteName}" not found. Available sites: ${availableSites || 'none'}. Use list_sites tool first.`);
     }
+
+    const siteDir = path.join(appInstance.sitesDir, siteName);
+    const dbPath = path.join(siteDir, 'input', 'db.sqlite');
 
     // Connect to site database
     if (appInstance.db) {
