@@ -255,7 +255,7 @@ class PageTools {
     }
 
     appInstance.db = new DBUtils(new Database(dbPath));
-    console.log(`[MCP] Connected to database: ${dbPath}`);
+    console.error(`[MCP] Connected to database: ${dbPath}`);
   }
 
   /**
@@ -375,7 +375,7 @@ class PageTools {
         featuredImage = normalizePath(destPath);
         featuredImageFilename = finalFileName;
 
-        console.log(`[MCP] Copied featured image to: ${destPath}`);
+        console.error(`[MCP] Copied featured image to: ${destPath}`);
       }
 
       const pageData = {
@@ -405,12 +405,12 @@ class PageTools {
       const page = new Page(appInstance, pageData);
       const result = page.save();
 
-      console.log(`[MCP] Created page: ${args.title} (ID: ${result.pageID})`);
+      console.error(`[MCP] Created page: ${args.title} (ID: ${result.pageID})`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
         appInstance.mainWindow.webContents.send('app-page-saved', result);
-        console.log('[MCP] Frontend notified of new page');
+        console.error('[MCP] Frontend notified of new page');
       }
 
       return {
@@ -476,7 +476,7 @@ class PageTools {
           featuredImage = '';
           featuredImageFilename = '';
           featuredImageData = false;
-          console.log('[MCP] Removing featured image');
+          console.error('[MCP] Removing featured image');
         } else if (fs.existsSync(args.featuredImage)) {
           // New featured image provided
           const siteDir = path.join(appInstance.sitesDir, args.site);
@@ -502,7 +502,7 @@ class PageTools {
             credits: args.featuredImageCredits || ''
           };
 
-          console.log(`[MCP] Updated featured image: ${destPath}`);
+          console.error(`[MCP] Updated featured image: ${destPath}`);
         } else {
           throw new Error(`Featured image file not found: ${args.featuredImage}`);
         }
@@ -543,12 +543,12 @@ class PageTools {
       const updatedPage = new Page(appInstance, pageData);
       const result = updatedPage.save();
 
-      console.log(`[MCP] Updated page: ${pageData.title} (ID: ${args.id})`);
+      console.error(`[MCP] Updated page: ${pageData.title} (ID: ${args.id})`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
         appInstance.mainWindow.webContents.send('app-page-saved', result);
-        console.log('[MCP] Frontend notified of updated page');
+        console.error('[MCP] Frontend notified of updated page');
       }
 
       return {
@@ -576,7 +576,7 @@ class PageTools {
       const page = new Page(appInstance, { site: siteName, id: pageId });
       const result = page.delete();
 
-      console.log(`[MCP] Deleted page ID: ${pageId}`);
+      console.error(`[MCP] Deleted page ID: ${pageId}`);
 
       return {
         content: [{

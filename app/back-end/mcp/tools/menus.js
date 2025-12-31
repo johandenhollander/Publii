@@ -283,12 +283,12 @@ class MenuTools {
 
       this.writeMenuConfig(args.site, menus, appInstance);
 
-      console.log(`[MCP] Set menu "${menuName}" with ${items.length} items`);
+      console.error(`[MCP] Set menu "${menuName}" with ${items.length} items`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
         appInstance.mainWindow.webContents.send('app-menu-updated');
-        console.log('[MCP] Frontend notified of menu update');
+        console.error('[MCP] Frontend notified of menu update');
       }
 
       return {
@@ -346,7 +346,7 @@ class MenuTools {
 
       this.writeMenuConfig(args.site, menus, appInstance);
 
-      console.log(`[MCP] Added menu item "${args.label}" to "${menuName}"`);
+      console.error(`[MCP] Added menu item "${args.label}" to "${menuName}"`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
@@ -405,7 +405,7 @@ class MenuTools {
 
       this.writeMenuConfig(args.site, menus, appInstance);
 
-      console.log(`[MCP] Removed menu item from "${menuName}"`);
+      console.error(`[MCP] Removed menu item from "${menuName}"`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
@@ -447,7 +447,7 @@ class MenuTools {
 
       this.writeMenuConfig(siteName, menus, appInstance);
 
-      console.log(`[MCP] Cleared menu "${targetMenu}" (removed ${removedCount} items)`);
+      console.error(`[MCP] Cleared menu "${targetMenu}" (removed ${removedCount} items)`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {

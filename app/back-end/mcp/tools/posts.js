@@ -271,7 +271,7 @@ class PostTools {
     }
 
     appInstance.db = new DBUtils(new Database(dbPath));
-    console.log(`[MCP] Connected to database: ${dbPath}`);
+    console.error(`[MCP] Connected to database: ${dbPath}`);
   }
 
   /**
@@ -388,7 +388,7 @@ class PostTools {
         featuredImage = normalizePath(destPath);
         featuredImageFilename = finalFileName;
 
-        console.log(`[MCP] Copied featured image to: ${destPath}`);
+        console.error(`[MCP] Copied featured image to: ${destPath}`);
       }
 
       const postData = {
@@ -420,12 +420,12 @@ class PostTools {
       const post = new Post(appInstance, postData);
       const result = post.save();
 
-      console.log(`[MCP] Created post: ${args.title} (ID: ${result.postID})`);
+      console.error(`[MCP] Created post: ${args.title} (ID: ${result.postID})`);
 
       // Notify frontend to refresh posts list
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
         appInstance.mainWindow.webContents.send('app-post-saved', result);
-        console.log('[MCP] Frontend notified of new post');
+        console.error('[MCP] Frontend notified of new post');
       }
 
       return {
@@ -491,7 +491,7 @@ class PostTools {
           featuredImage = '';
           featuredImageFilename = '';
           featuredImageData = false;
-          console.log('[MCP] Removing featured image');
+          console.error('[MCP] Removing featured image');
         } else if (fs.existsSync(args.featuredImage)) {
           // New featured image provided
           const siteDir = path.join(appInstance.sitesDir, args.site);
@@ -517,7 +517,7 @@ class PostTools {
             credits: args.featuredImageCredits || ''
           };
 
-          console.log(`[MCP] Updated featured image: ${destPath}`);
+          console.error(`[MCP] Updated featured image: ${destPath}`);
         } else {
           throw new Error(`Featured image file not found: ${args.featuredImage}`);
         }
@@ -562,12 +562,12 @@ class PostTools {
       const updatedPost = new Post(appInstance, postData);
       const result = updatedPost.save();
 
-      console.log(`[MCP] Updated post: ${postData.title} (ID: ${args.id})`);
+      console.error(`[MCP] Updated post: ${postData.title} (ID: ${args.id})`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
         appInstance.mainWindow.webContents.send('app-post-saved', result);
-        console.log('[MCP] Frontend notified of updated post');
+        console.error('[MCP] Frontend notified of updated post');
       }
 
       return {
@@ -595,7 +595,7 @@ class PostTools {
       const post = new Post(appInstance, { site: siteName, id: postId });
       const result = post.delete();
 
-      console.log(`[MCP] Deleted post ID: ${postId}`);
+      console.error(`[MCP] Deleted post ID: ${postId}`);
 
       return {
         content: [{

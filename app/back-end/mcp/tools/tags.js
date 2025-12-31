@@ -181,7 +181,7 @@ class TagTools {
     }
 
     appInstance.db = new DBUtils(new Database(dbPath));
-    console.log(`[MCP] Connected to database: ${dbPath}`);
+    console.error(`[MCP] Connected to database: ${dbPath}`);
   }
 
   /**
@@ -284,12 +284,12 @@ class TagTools {
 
       const tagId = result.lastInsertRowid;
 
-      console.log(`[MCP] Created tag: ${args.name} (ID: ${tagId})`);
+      console.error(`[MCP] Created tag: ${args.name} (ID: ${tagId})`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
         appInstance.mainWindow.webContents.send('app-tag-saved', { tagID: tagId });
-        console.log('[MCP] Frontend notified of new tag');
+        console.error('[MCP] Frontend notified of new tag');
       }
 
       return {
@@ -345,12 +345,12 @@ class TagTools {
         appInstance.db.prepare(`UPDATE tags SET ${updates.join(', ')} WHERE id = ?`).run(values);
       }
 
-      console.log(`[MCP] Updated tag ID: ${args.id}`);
+      console.error(`[MCP] Updated tag ID: ${args.id}`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
         appInstance.mainWindow.webContents.send('app-tag-saved', { tagID: args.id });
-        console.log('[MCP] Frontend notified of updated tag');
+        console.error('[MCP] Frontend notified of updated tag');
       }
 
       return {
@@ -381,12 +381,12 @@ class TagTools {
       // Delete the tag
       appInstance.db.prepare('DELETE FROM tags WHERE id = ?').run([tagId]);
 
-      console.log(`[MCP] Deleted tag ID: ${tagId}`);
+      console.error(`[MCP] Deleted tag ID: ${tagId}`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
         appInstance.mainWindow.webContents.send('app-tag-deleted', { tagID: tagId });
-        console.log('[MCP] Frontend notified of deleted tag');
+        console.error('[MCP] Frontend notified of deleted tag');
       }
 
       return {

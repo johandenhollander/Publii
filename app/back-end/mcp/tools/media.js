@@ -314,7 +314,7 @@ class MediaTools {
       // Create file:// URL (Publii format)
       const fileUrl = 'file://' + normalizePath(destPath);
 
-      console.log(`[MCP] Uploaded image: ${fileUrl} (${width}x${height})`);
+      console.error(`[MCP] Uploaded image: ${fileUrl} (${width}x${height})`);
 
       // Notify frontend if running in Publii
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
@@ -379,7 +379,7 @@ class MediaTools {
       const relativePath = `media/${type}/${destFilename}`;
       const fileUrl = 'file://' + normalizePath(destPath);
 
-      console.log(`[MCP] Uploaded file: ${relativePath}`);
+      console.error(`[MCP] Uploaded file: ${relativePath}`);
 
       return {
         content: [{
@@ -414,7 +414,7 @@ class MediaTools {
 
       fs.unlinkSync(fullPath);
 
-      console.log(`[MCP] Deleted media: ${relativePath}`);
+      console.error(`[MCP] Deleted media: ${relativePath}`);
 
       // Notify frontend
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
