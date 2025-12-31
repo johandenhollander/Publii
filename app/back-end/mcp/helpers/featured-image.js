@@ -1,8 +1,15 @@
 /**
- * Featured Image Helper for MCP Tools
+ * Image Helper for MCP Tools
  *
  * Uses Publii's Image class to properly save images and generate responsive versions.
- * This ensures MCP-created posts have the same image handling as UI-created posts.
+ * This ensures MCP-created content has the same image handling as UI-created content.
+ *
+ * Supports all image types:
+ * - featuredImages: Post/page hero images
+ * - contentImages: Images in post/page content
+ * - galleryImages: Images in galleries (thumbnail generation)
+ * - optionImages: Theme option images
+ * - tagImages/authorImages: Tag and author images
  */
 
 const path = require('path');
@@ -10,21 +17,22 @@ const fs = require('fs-extra');
 const Image = require('../../image.js');
 const sizeOf = require('image-size');
 const normalizePath = require('normalize-path');
+const slugify = require('../../helpers/slug.js');
 
 /**
- * Save a featured image using Publii's Image class
+ * Save an image using Publii's Image class with responsive generation
  *
  * @param {string} sourcePath - Absolute path to the source image file
  * @param {Object} appInstance - Publii app instance with site info
  * @param {string} siteName - Site name
  * @param {number|string} itemId - Post/Page ID (0 or 'temp' for new items)
- * @param {string} imageType - 'featuredImages', 'contentImages', etc.
+ * @param {string} imageType - 'featuredImages', 'contentImages', 'galleryImages', etc.
  * @returns {Promise<Object>} - { featuredImage, featuredImageFilename, dimensions }
  */
 async function saveFeaturedImage(sourcePath, appInstance, siteName, itemId, imageType = 'featuredImages') {
   // Validate source file exists
   if (!sourcePath || !fs.existsSync(sourcePath)) {
-    throw new Error(`Featured image file not found: ${sourcePath}`);
+    throw new Error(`Image file not found: ${sourcePath}`);
   }
 
   // Ensure appConfig exists with resizeEngine (required by Image class)
@@ -45,12 +53,11 @@ async function saveFeaturedImage(sourcePath, appInstance, siteName, itemId, imag
   // Create Image instance using Publii's class
   const image = new Image(appInstance, imageData);
 
-  // Save returns synchronously with path info, but file copy is async
-  // We need to wait for the file to be copied before generating responsive images
-  const result = await saveImageSync(image);
+  // Save image to correct location based on type
+  const result = await saveImageToDirectory(image, imageType);
 
   if (!result || !result.newPath) {
-    throw new Error('Failed to save featured image');
+    throw new Error('Failed to save image');
   }
 
   // Generate responsive images using Publii's method
@@ -63,6 +70,8 @@ async function saveFeaturedImage(sourcePath, appInstance, siteName, itemId, imag
     } catch (err) {
       console.error('[MCP] Warning: Some responsive images may not have been generated:', err.message);
     }
+  } else {
+    console.error(`[MCP] No responsive images configured for type: ${imageType}`);
   }
 
   return {
@@ -73,22 +82,50 @@ async function saveFeaturedImage(sourcePath, appInstance, siteName, itemId, imag
 }
 
 /**
- * Synchronous wrapper for Image.save() that waits for file copy
+ * Save image to the correct directory based on image type
  */
-function saveImageSync(imageInstance) {
+function saveImageToDirectory(imageInstance, imageType) {
   return new Promise((resolve, reject) => {
     try {
-      // Get the paths that Image.save() will use
-      const dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'posts', imageInstance.id.toString());
-      const responsiveDirPath = path.join(dirPath, 'responsive');
+      const idStr = imageInstance.id.toString();
+      let dirPath;
+      let responsiveDirPath;
+
+      // Determine directory based on image type (mirrors Image.save() logic)
+      switch (imageType) {
+        case 'galleryImages':
+          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'posts', idStr, 'gallery');
+          responsiveDirPath = null;  // Gallery images don't have separate responsive dir
+          break;
+
+        case 'tagImages':
+          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'tags', idStr);
+          responsiveDirPath = path.join(dirPath, 'responsive');
+          break;
+
+        case 'authorImages':
+          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'authors', idStr);
+          responsiveDirPath = path.join(dirPath, 'responsive');
+          break;
+
+        case 'optionImages':
+          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'website');
+          responsiveDirPath = path.join(dirPath, 'responsive');
+          break;
+
+        default:  // featuredImages, contentImages
+          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'posts', idStr);
+          responsiveDirPath = path.join(dirPath, 'responsive');
+      }
 
       // Ensure directories exist
       fs.ensureDirSync(dirPath);
-      fs.ensureDirSync(responsiveDirPath);
+      if (responsiveDirPath) {
+        fs.ensureDirSync(responsiveDirPath);
+      }
 
-      // Get source file info
+      // Generate clean filename
       const fileName = path.basename(imageInstance.path);
-      const slugify = require('../../helpers/slug.js');
       const fileNameData = path.parse(fileName);
       const finalFileName = slugify(fileNameData.name, false, true) + fileNameData.ext;
       const destPath = path.join(dirPath, finalFileName);
