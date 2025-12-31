@@ -1299,6 +1299,11 @@
         "toUseThisOptionEnableIndexingTagPages": "To use this option, first enable indexing of tag pages in SEO settings.",
         "url": "URL"
     },
+    "mcp": {
+        "statusActive": "MCP server is active and connected",
+        "statusIdle": "MCP server is running but idle",
+        "statusInactive": "MCP server is not running"
+    },
     "theme": {
         "addThemeSuccessMessage": "Theme has been successfully added.",
         "authorOptions": "Author options",

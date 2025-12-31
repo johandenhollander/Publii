@@ -2,12 +2,14 @@
     <aside class="sidebar">
         <topbar-sites />
         <sidebar-menu />
+        <sidebar-mcp-status />
         <sidebar-sync-button />
     </aside>
 </template>
 
 <script>
 import SidebarMenu from './SidebarMenu';
+import SidebarMcpStatus from './SidebarMcpStatus';
 import SidebarSyncButton from './SidebarSyncButton';
 import SidebarSites from './SidebarSites';
 
@@ -15,6 +17,7 @@ export default {
     name: 'sidebar',
     components: {
         'sidebar-menu': SidebarMenu,
+        'sidebar-mcp-status': SidebarMcpStatus,
         'sidebar-sync-button': SidebarSyncButton,
         'topbar-sites': SidebarSites
     }

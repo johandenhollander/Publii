@@ -6,10 +6,17 @@
  */
 
 const ipcMain = require('electron').ipcMain;
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 class MCPEvents {
   constructor(appInstance) {
     console.log('[MCP Events] Registering IPC handlers...');
+
+    // Path to MCP status file (written by CLI)
+    const configDir = path.join(os.homedir(), 'Documents', 'Publii', 'config');
+    const statusFile = path.join(configDir, 'mcp-status.json');
 
     /**
      * Start MCP server
@@ -94,6 +101,60 @@ class MCPEvents {
         console.error('[MCP Events] Error restarting MCP server:', error);
         event.sender.send('app-mcp-error', {
           success: false,
+          error: error.message
+        });
+      }
+    });
+
+    /**
+     * Get external MCP CLI status (from status file)
+     *
+     * This checks the status file written by the MCP CLI process
+     * (used by Claude Desktop) to show connection status in the UI.
+     *
+     * Usage from frontend:
+     *   mainProcessAPI.send('app-mcp-cli-status');
+     *   mainProcessAPI.receiveOnce('app-mcp-cli-status-result', (status) => { ... });
+     */
+    ipcMain.on('app-mcp-cli-status', (event) => {
+      try {
+        let status = {
+          active: false,
+          pid: null,
+          startedAt: null,
+          lastActivity: null,
+          toolCalls: 0,
+          isStale: true
+        };
+
+        if (fs.existsSync(statusFile)) {
+          const data = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+          status = { ...data };
+
+          // Check if status is stale (no activity in last 30 seconds)
+          if (data.lastActivity) {
+            const timeSinceActivity = Date.now() - data.lastActivity;
+            status.isStale = timeSinceActivity > 30000;
+            status.secondsSinceActivity = Math.floor(timeSinceActivity / 1000);
+          }
+
+          // Check if process is still running (on Unix-like systems)
+          if (data.pid && data.active) {
+            try {
+              process.kill(data.pid, 0); // Signal 0 = check if process exists
+              status.processRunning = true;
+            } catch (e) {
+              status.processRunning = false;
+              status.active = false; // Process died
+            }
+          }
+        }
+
+        event.sender.send('app-mcp-cli-status-result', status);
+      } catch (error) {
+        console.error('[MCP Events] Error reading MCP CLI status:', error);
+        event.sender.send('app-mcp-cli-status-result', {
+          active: false,
           error: error.message
         });
       }

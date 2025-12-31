@@ -39,6 +39,48 @@ const MediaTools = require('./tools/media.js');
 const dataDir = path.join(os.homedir(), 'Documents', 'Publii');
 const sitesDir = path.join(dataDir, 'sites');
 const configDir = path.join(dataDir, 'config');
+const statusFile = path.join(configDir, 'mcp-status.json');
+
+// MCP status tracking
+let toolCallCount = 0;
+const startedAt = Date.now();
+
+function updateStatusFile(active = true) {
+  try {
+    const status = {
+      active: active,
+      pid: process.pid,
+      startedAt: startedAt,
+      lastActivity: Date.now(),
+      toolCalls: toolCallCount
+    };
+    fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
+  } catch (e) {
+    console.error('[MCP] Error writing status file:', e.message);
+  }
+}
+
+function clearStatusFile() {
+  try {
+    if (fs.existsSync(statusFile)) {
+      const status = {
+        active: false,
+        pid: null,
+        startedAt: null,
+        lastActivity: Date.now(),
+        toolCalls: toolCallCount
+      };
+      fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
+    }
+  } catch (e) {
+    console.error('[MCP] Error clearing status file:', e.message);
+  }
+}
+
+// Clean up status file on exit
+process.on('exit', clearStatusFile);
+process.on('SIGINT', () => { clearStatusFile(); process.exit(0); });
+process.on('SIGTERM', () => { clearStatusFile(); process.exit(0); });
 
 // Load app config
 function loadAppConfig() {
@@ -101,6 +143,9 @@ async function main() {
   console.error(`[MCP] Publii data: ${dataDir}`);
   console.error(`[MCP] Sites found: ${Object.keys(appInstance.sites).join(', ') || 'none'}`);
 
+  // Write initial status
+  updateStatusFile(true);
+
   // Create MCP server
   const server = new Server({
     name: 'publii-mcp-server',
@@ -129,6 +174,10 @@ async function main() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     console.error(`[MCP] Tool called: ${name}`);
+
+    // Update status
+    toolCallCount++;
+    updateStatusFile(true);
 
     try {
       // Reload sites on each call (in case they changed)

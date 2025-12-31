@@ -104,7 +104,8 @@ contextBridge.exposeInMainWorld('mainProcessAPI', {
             'app-set-notifications-center-state',
             'app-get-notifications-file',
             'app-pages-hierarchy-update',
-            'app-content-fields-update'
+            'app-content-fields-update',
+            'app-mcp-cli-status'
         ];
 
         if (validChannels.includes(channel)) {
@@ -219,7 +220,8 @@ contextBridge.exposeInMainWorld('mainProcessAPI', {
             'app-site-plugin-activated',
             'app-site-plugin-deactivated',
             'app-site-get-plugin-config-retrieved',
-            'app-content-fields-updated'
+            'app-content-fields-updated',
+            'app-mcp-cli-status-result'
         ];
 
         if (validChannels.includes(channel)) {
