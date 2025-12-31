@@ -5,11 +5,13 @@
  */
 
 const path = require('path');
+const fs = require('fs-extra');
 const Database = require('node-sqlite3-wasm').Database;
 const DBUtils = require('../../helpers/db.utils.js');
 const Post = require('../../post.js');
 const Posts = require('../../posts.js');
 const slugify = require('../../helpers/slug.js');
+const normalizePath = require('normalize-path');
 
 class PostTools {
   /**
@@ -101,6 +103,22 @@ class PostTools {
               description: 'Editor format for content. Use "tinymce" for HTML, "blockeditor" for JSON blocks, "markdown" for markdown',
               enum: ['tinymce', 'blockeditor', 'markdown'],
               default: 'tinymce'
+            },
+            featuredImage: {
+              type: 'string',
+              description: 'Absolute path to featured image file. Example: "/home/user/images/hero.jpg"'
+            },
+            featuredImageAlt: {
+              type: 'string',
+              description: 'Alt text for featured image (for accessibility)'
+            },
+            featuredImageCaption: {
+              type: 'string',
+              description: 'Caption text displayed below featured image'
+            },
+            featuredImageCredits: {
+              type: 'string',
+              description: 'Credits/attribution for the featured image'
             }
           },
           required: ['site', 'title', 'text']
@@ -154,6 +172,22 @@ class PostTools {
               type: 'string',
               description: 'Editor type',
               enum: ['tinymce', 'blockeditor', 'markdown']
+            },
+            featuredImage: {
+              type: 'string',
+              description: 'Absolute path to new featured image file. Set to empty string to remove existing image.'
+            },
+            featuredImageAlt: {
+              type: 'string',
+              description: 'Alt text for featured image'
+            },
+            featuredImageCaption: {
+              type: 'string',
+              description: 'Caption text for featured image'
+            },
+            featuredImageCredits: {
+              type: 'string',
+              description: 'Credits/attribution for featured image'
             }
           },
           required: ['site', 'id']
@@ -314,6 +348,49 @@ class PostTools {
       // Generate slug from title if not provided
       const postSlug = args.slug || slugify(args.title);
 
+      // Handle featured image if provided
+      let featuredImage = '';
+      let featuredImageFilename = '';
+      let featuredImageData = false;
+
+      if (args.featuredImage) {
+        // Validate source file exists
+        if (!fs.existsSync(args.featuredImage)) {
+          throw new Error(`Featured image file not found: ${args.featuredImage}`);
+        }
+
+        featuredImageFilename = path.basename(args.featuredImage);
+
+        // Featured image data with alt, caption, credits
+        featuredImageData = {
+          alt: args.featuredImageAlt || '',
+          caption: args.featuredImageCaption || '',
+          credits: args.featuredImageCredits || ''
+        };
+
+        // For new posts, we need to copy to temp directory first
+        // Publii will move it to the correct post ID directory after saving
+        const siteDir = path.join(appInstance.sitesDir, args.site);
+        const tempImagesDir = path.join(siteDir, 'input', 'media', 'posts', 'temp');
+
+        // Ensure temp directory exists
+        fs.ensureDirSync(tempImagesDir);
+
+        // Slugify the filename for consistency
+        const fileNameData = path.parse(featuredImageFilename);
+        const finalFileName = slugify(fileNameData.name, false, true) + fileNameData.ext;
+        const destPath = path.join(tempImagesDir, finalFileName);
+
+        // Copy the image file
+        fs.copySync(args.featuredImage, destPath);
+
+        // Set the featured image path (Publii expects the full path)
+        featuredImage = normalizePath(destPath);
+        featuredImageFilename = finalFileName;
+
+        console.log(`[MCP] Copied featured image to: ${destPath}`);
+      }
+
       const postData = {
         site: args.site,
         id: 0, // 0 = new post
@@ -326,9 +403,9 @@ class PostTools {
         modificationDate: now,
         template: args.template || '',
         tags: args.tags || [],
-        featuredImage: '',
-        featuredImageFilename: '',
-        featuredImageData: false,
+        featuredImage: featuredImage,
+        featuredImageFilename: featuredImageFilename,
+        featuredImageData: featuredImageData,
         additionalData: {
           metaTitle: '',
           metaDesc: '',
@@ -384,27 +461,102 @@ class PostTools {
       const existing = existingData.posts[0];
       const now = Date.now();
 
+      // Extract existing featured image info from loaded data
+      // Note: post.load() returns featuredImage as { url, additional_data } from posts_images table
+      let existingFeaturedImageUrl = '';
+      let existingFeaturedImageData = false;
+
+      if (existingData.featuredImage && existingData.featuredImage.url) {
+        existingFeaturedImageUrl = existingData.featuredImage.url;
+        try {
+          existingFeaturedImageData = existingData.featuredImage.additional_data
+            ? JSON.parse(existingData.featuredImage.additional_data)
+            : false;
+        } catch (e) {
+          existingFeaturedImageData = false;
+        }
+      }
+
+      // Handle featured image update
+      let featuredImage = existingFeaturedImageUrl ? path.join(
+        appInstance.sitesDir, args.site, 'input', 'media', 'posts', args.id.toString(), existingFeaturedImageUrl
+      ) : '';
+      let featuredImageFilename = existingFeaturedImageUrl || '';
+      let featuredImageData = existingFeaturedImageData;
+
+      // Check if featured image is being updated
+      if (args.featuredImage !== undefined) {
+        if (args.featuredImage === '') {
+          // User wants to remove the featured image
+          featuredImage = '';
+          featuredImageFilename = '';
+          featuredImageData = false;
+          console.log('[MCP] Removing featured image');
+        } else if (fs.existsSync(args.featuredImage)) {
+          // New featured image provided
+          const siteDir = path.join(appInstance.sitesDir, args.site);
+          const postImagesDir = path.join(siteDir, 'input', 'media', 'posts', args.id.toString());
+
+          // Ensure post images directory exists
+          fs.ensureDirSync(postImagesDir);
+
+          // Slugify the filename
+          const originalFilename = path.basename(args.featuredImage);
+          const fileNameData = path.parse(originalFilename);
+          const finalFileName = slugify(fileNameData.name, false, true) + fileNameData.ext;
+          const destPath = path.join(postImagesDir, finalFileName);
+
+          // Copy the image file
+          fs.copySync(args.featuredImage, destPath);
+
+          featuredImage = normalizePath(destPath);
+          featuredImageFilename = finalFileName;
+          featuredImageData = {
+            alt: args.featuredImageAlt || '',
+            caption: args.featuredImageCaption || '',
+            credits: args.featuredImageCredits || ''
+          };
+
+          console.log(`[MCP] Updated featured image: ${destPath}`);
+        } else {
+          throw new Error(`Featured image file not found: ${args.featuredImage}`);
+        }
+      } else if (args.featuredImageAlt !== undefined || args.featuredImageCaption !== undefined || args.featuredImageCredits !== undefined) {
+        // Update just the featured image metadata without changing the image itself
+        if (featuredImageData) {
+          featuredImageData = {
+            alt: args.featuredImageAlt !== undefined ? args.featuredImageAlt : (featuredImageData.alt || ''),
+            caption: args.featuredImageCaption !== undefined ? args.featuredImageCaption : (featuredImageData.caption || ''),
+            credits: args.featuredImageCredits !== undefined ? args.featuredImageCredits : (featuredImageData.credits || '')
+          };
+        }
+      }
+
+      // Extract tag IDs from the loaded tags data
+      const existingTagIds = existingData.tags ? existingData.tags.map(t => t.id) : [];
+
       // Merge existing data with updates
+      // Note: DB columns are: id, title, authors, slug, text, featured_image_id, created_at, modified_at, status, template
       const postData = {
         site: args.site,
         id: args.id,
         title: args.title !== undefined ? args.title : existing.title,
         slug: args.slug !== undefined ? args.slug : existing.slug,
         text: args.text !== undefined ? args.text : existing.text,
-        author: args.author !== undefined ? args.author : existing.author,
+        author: args.author !== undefined ? args.author : existing.authors,  // DB column is 'authors'
         status: args.status !== undefined ? args.status : existing.status,
-        creationDate: existing.creationDate,
+        creationDate: existing.created_at,  // DB column is 'created_at'
         modificationDate: now,
-        template: args.template !== undefined ? args.template : existing.template,
-        tags: args.tags !== undefined ? args.tags : existing.tags,
-        featuredImage: existing.featuredImage || '',
-        featuredImageFilename: existing.featuredImageFilename || '',
-        featuredImageData: existing.featuredImageData || false,
+        template: args.template !== undefined ? args.template : (existing.template || ''),
+        tags: args.tags !== undefined ? args.tags : existingTagIds,  // Tags come from existingData.tags
+        featuredImage: featuredImage,
+        featuredImageFilename: featuredImageFilename,
+        featuredImageData: featuredImageData,
         additionalData: {
-          ...existing.additionalData,
-          editor: args.editor !== undefined ? args.editor : (existing.additionalData?.editor || 'tinymce')
+          ...(existingData.additionalData || {}),  // From existingData, not existing
+          editor: args.editor !== undefined ? args.editor : (existingData.additionalData?.editor || 'tinymce')
         },
-        postViewSettings: existing.postViewSettings || {}
+        postViewSettings: existingData.postViewSettings || {}  // From existingData, not existing
       };
 
       const updatedPost = new Post(appInstance, postData);
