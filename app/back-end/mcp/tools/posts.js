@@ -222,24 +222,43 @@ class PostTools {
     // Ensure we're connected to the right site's database
     await this.ensureSiteConnection(args.site, appInstance);
 
-    switch (toolName) {
-      case 'list_posts':
-        return await this.listPosts(args.site, args.status, appInstance);
+    try {
+      switch (toolName) {
+        case 'list_posts':
+          return await this.listPosts(args.site, args.status, appInstance);
 
-      case 'get_post':
-        return await this.getPost(args.site, args.id, appInstance);
+        case 'get_post':
+          return await this.getPost(args.site, args.id, appInstance);
 
-      case 'create_post':
-        return await this.createPost(args, appInstance);
+        case 'create_post':
+          return await this.createPost(args, appInstance);
 
-      case 'update_post':
-        return await this.updatePost(args, appInstance);
+        case 'update_post':
+          return await this.updatePost(args, appInstance);
 
-      case 'delete_post':
-        return await this.deletePost(args.site, args.id, appInstance);
+        case 'delete_post':
+          return await this.deletePost(args.site, args.id, appInstance);
 
-      default:
-        throw new Error(`Unknown post tool: ${toolName}`);
+        default:
+          throw new Error(`Unknown post tool: ${toolName}`);
+      }
+    } finally {
+      // Always close database connection to prevent locks
+      this.closeConnection(appInstance);
+    }
+  }
+
+  /**
+   * Close database connection to prevent locks
+   */
+  static closeConnection(appInstance) {
+    if (appInstance.db) {
+      try {
+        appInstance.db.close();
+        appInstance.db = null;
+      } catch (e) {
+        // Already closed
+      }
     }
   }
 

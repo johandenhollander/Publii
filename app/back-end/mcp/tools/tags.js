@@ -131,24 +131,43 @@ class TagTools {
     // Ensure we're connected to the right site's database
     await this.ensureSiteConnection(args.site, appInstance);
 
-    switch (toolName) {
-      case 'list_tags':
-        return await this.listTags(args.site, appInstance);
+    try {
+      switch (toolName) {
+        case 'list_tags':
+          return await this.listTags(args.site, appInstance);
 
-      case 'get_tag':
-        return await this.getTag(args.site, args.id, appInstance);
+        case 'get_tag':
+          return await this.getTag(args.site, args.id, appInstance);
 
-      case 'create_tag':
-        return await this.createTag(args, appInstance);
+        case 'create_tag':
+          return await this.createTag(args, appInstance);
 
-      case 'update_tag':
-        return await this.updateTag(args, appInstance);
+        case 'update_tag':
+          return await this.updateTag(args, appInstance);
 
-      case 'delete_tag':
-        return await this.deleteTag(args.site, args.id, appInstance);
+        case 'delete_tag':
+          return await this.deleteTag(args.site, args.id, appInstance);
 
-      default:
-        throw new Error(`Unknown tag tool: ${toolName}`);
+        default:
+          throw new Error(`Unknown tag tool: ${toolName}`);
+      }
+    } finally {
+      // Always close database connection to prevent locks
+      this.closeConnection(appInstance);
+    }
+  }
+
+  /**
+   * Close database connection to prevent locks
+   */
+  static closeConnection(appInstance) {
+    if (appInstance.db) {
+      try {
+        appInstance.db.close();
+        appInstance.db = null;
+      } catch (e) {
+        // Already closed
+      }
     }
   }
 

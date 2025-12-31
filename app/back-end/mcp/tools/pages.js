@@ -206,24 +206,43 @@ class PageTools {
     // Ensure we're connected to the right site's database
     await this.ensureSiteConnection(args.site, appInstance);
 
-    switch (toolName) {
-      case 'list_pages':
-        return await this.listPages(args.site, args.status, appInstance);
+    try {
+      switch (toolName) {
+        case 'list_pages':
+          return await this.listPages(args.site, args.status, appInstance);
 
-      case 'get_page':
-        return await this.getPage(args.site, args.id, appInstance);
+        case 'get_page':
+          return await this.getPage(args.site, args.id, appInstance);
 
-      case 'create_page':
-        return await this.createPage(args, appInstance);
+        case 'create_page':
+          return await this.createPage(args, appInstance);
 
-      case 'update_page':
-        return await this.updatePage(args, appInstance);
+        case 'update_page':
+          return await this.updatePage(args, appInstance);
 
-      case 'delete_page':
-        return await this.deletePage(args.site, args.id, appInstance);
+        case 'delete_page':
+          return await this.deletePage(args.site, args.id, appInstance);
 
-      default:
-        throw new Error(`Unknown page tool: ${toolName}`);
+        default:
+          throw new Error(`Unknown page tool: ${toolName}`);
+      }
+    } finally {
+      // Always close database connection to prevent locks
+      this.closeConnection(appInstance);
+    }
+  }
+
+  /**
+   * Close database connection to prevent locks
+   */
+  static closeConnection(appInstance) {
+    if (appInstance.db) {
+      try {
+        appInstance.db.close();
+        appInstance.db = null;
+      } catch (e) {
+        // Already closed
+      }
     }
   }
 
