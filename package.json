@@ -1,7 +1,7 @@
 {
   "productName": "Publii",
   "name": "Publii",
-  "version": "0.47.4",
+  "version": "0.47.4-mcp.1",
   "description": "Static Site CMS",
   "homepage": "https://getpublii.com",
   "author": {
@@ -87,6 +87,7 @@
       "!app/node_modules/electron-*",
       "app/node_modules/publii-block-editor"
     ],
+    "asar": false,
     "linux": {
       "icon": "./build/installation/icon.icns",
       "target": [
@@ -142,6 +143,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "node-gyp": "10.0.1"
+    "node-gyp": "10.0.1",
+    "node-sqlite3-wasm": "^0.8.52"
   }
 }

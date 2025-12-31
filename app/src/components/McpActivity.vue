@@ -72,21 +72,25 @@
         <!-- No Clients Connected -->
         <div v-else class="mcp-status-card">
             <div class="mcp-not-connected">
-                <p>{{ $t('mcp.notConnectedMessage') }}</p>
-                <div class="mcp-setup-instructions">
-                    <p>{{ $t('mcp.setupInstructionsIntro') }}</p>
-                    <div class="mcp-code-block">
-                        <pre ref="mcpConfig">{{ mcpConfigJson }}</pre>
-                        <button
-                            class="mcp-copy-btn"
-                            @click="copyMcpConfig"
-                            :title="$t('mcp.copyConfig')">
-                            <icon name="copy" size="s" />
-                        </button>
-                    </div>
-                    <p class="mcp-copy-status" v-if="copyStatus">{{ copyStatus }}</p>
-                </div>
+                <p v-if="hasActivityLog">{{ $t('mcp.noClientsCurrentlyActive') }}</p>
+                <p v-else>{{ $t('mcp.notConnectedMessage') }}</p>
             </div>
+        </div>
+
+        <!-- MCP Configuration (always visible) -->
+        <div class="mcp-status-card">
+            <h3>{{ $t('mcp.configurationTitle') }}</h3>
+            <p class="mcp-config-intro">{{ $t('mcp.setupInstructionsIntro') }}</p>
+            <div class="mcp-code-block">
+                <pre ref="mcpConfig">{{ mcpConfigJson }}</pre>
+                <button
+                    class="mcp-copy-btn"
+                    @click="copyMcpConfig"
+                    :title="$t('mcp.copyConfig')">
+                    <icon name="duplicate" size="s" />
+                </button>
+            </div>
+            <p class="mcp-copy-status" v-if="copyStatus">{{ copyStatus }}</p>
         </div>
 
         <!-- Activity Log -->
@@ -426,6 +430,11 @@ export default {
         color: var(--text-light-color);
         margin: 0 0 1rem;
     }
+}
+
+.mcp-config-intro {
+    color: var(--text-light-color);
+    margin: 0 0 1rem !important;
 }
 
 .mcp-code-block {
