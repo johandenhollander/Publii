@@ -19,25 +19,74 @@ class MCPEvents {
     const statusFile = path.join(configDir, 'mcp-status.json');
     const activityLogFile = path.join(configDir, 'mcp-activity.json');
 
-    // Track last known activity count for change detection
-    let lastActivityCount = 0;
-    let activityWatcher = null;
+    // Track last known activity timestamp for change detection
+    // Using timestamp instead of count because log is capped at 100 entries
+    let lastSeenTimestamp = 0;
+    let activityPollInterval = null;
+    const POLL_INTERVAL = 1000; // Check every 1 second
 
-    // Initialize last activity count
+    // Initialize last seen timestamp
     try {
       if (fs.existsSync(activityLogFile)) {
         const data = JSON.parse(fs.readFileSync(activityLogFile, 'utf8'));
-        lastActivityCount = (data.entries || []).length;
+        const entries = data.entries || [];
+        if (entries.length > 0 && entries[0].timestamp) {
+          lastSeenTimestamp = entries[0].timestamp;
+        }
+        console.log(`[MCP Events] Initial last seen timestamp: ${lastSeenTimestamp}`);
       }
     } catch (e) {
-      // Ignore
+      console.error('[MCP Events] Error reading initial activity:', e.message);
     }
 
     /**
-     * Watch activity log for changes and notify frontend
+     * Check for new activity entries and notify frontend
+     * Compares timestamps because log is capped at 100 entries (count-based detection doesn't work)
      */
-    const startActivityWatcher = () => {
-      if (activityWatcher) return;
+    const checkForNewActivity = () => {
+      try {
+        if (!fs.existsSync(activityLogFile)) return;
+
+        const data = JSON.parse(fs.readFileSync(activityLogFile, 'utf8'));
+        const entries = data.entries || [];
+
+        if (entries.length === 0) {
+          if (lastSeenTimestamp > 0) {
+            console.log('[MCP Events] Activity log was cleared');
+            lastSeenTimestamp = 0;
+          }
+          return;
+        }
+
+        // Find all entries newer than lastSeenTimestamp
+        const newEntries = entries.filter(e => e.timestamp > lastSeenTimestamp);
+
+        if (newEntries.length > 0) {
+          console.log(`[MCP Events] Found ${newEntries.length} new activity entries`);
+
+          // Update last seen timestamp to most recent
+          lastSeenTimestamp = entries[0].timestamp;
+
+          // Send each new entry to the frontend (most recent first)
+          for (const entry of newEntries) {
+            if (appInstance.mainWindow && !appInstance.mainWindow.isDestroyed()) {
+              console.log('[MCP Events] Sending to frontend:', entry.summary);
+              appInstance.mainWindow.webContents.send('app-mcp-activity', entry);
+            } else {
+              console.log('[MCP Events] No valid mainWindow to send to');
+            }
+          }
+        }
+      } catch (e) {
+        // Silently ignore parse errors
+      }
+    };
+
+    /**
+     * Start polling for activity changes
+     */
+    const startActivityPolling = () => {
+      if (activityPollInterval) return;
 
       // Ensure the config directory exists
       if (!fs.existsSync(configDir)) {
@@ -49,43 +98,14 @@ class MCPEvents {
         fs.writeFileSync(activityLogFile, JSON.stringify({ entries: [] }, null, 2));
       }
 
-      try {
-        activityWatcher = fs.watch(activityLogFile, { persistent: false }, (eventType) => {
-          if (eventType === 'change') {
-            try {
-              const data = JSON.parse(fs.readFileSync(activityLogFile, 'utf8'));
-              const entries = data.entries || [];
-
-              // Check for new entries
-              if (entries.length > lastActivityCount) {
-                const newEntries = entries.slice(0, entries.length - lastActivityCount);
-                lastActivityCount = entries.length;
-
-                // Send each new entry to the frontend (most recent first)
-                for (const entry of newEntries) {
-                  if (appInstance.mainWindow && !appInstance.mainWindow.isDestroyed()) {
-                    appInstance.mainWindow.webContents.send('app-mcp-activity', entry);
-                    console.log('[MCP Events] New MCP activity:', entry.summary);
-                  }
-                }
-              } else if (entries.length < lastActivityCount) {
-                // Log was cleared
-                lastActivityCount = entries.length;
-              }
-            } catch (e) {
-              // Ignore parse errors (file might be mid-write)
-            }
-          }
-        });
-
-        console.log('[MCP Events] Activity watcher started');
-      } catch (e) {
-        console.error('[MCP Events] Failed to start activity watcher:', e);
-      }
+      // Start polling interval
+      activityPollInterval = setInterval(checkForNewActivity, POLL_INTERVAL);
+      console.log(`[MCP Events] Activity polling started (${POLL_INTERVAL}ms interval)`);
     };
 
-    // Start the watcher
-    startActivityWatcher();
+    // Start polling immediately
+    console.log('[MCP Events] Initializing activity polling...');
+    startActivityPolling();
 
     /**
      * Start MCP server

@@ -304,8 +304,24 @@ mainProcessAPI.receive('app-data-loaded', function (initialData) {
                     lifeTime: 5
                 });
 
-                // Emit refresh event for relevant components after a delay
-                // This gives the MCP CLI time to release the database lock
+                // Reload site data for content-modifying operations
+                // This ensures the UI stays in sync regardless of which page is active
+                const needsReload = this.mcpActivityNeedsReload(activity.tool);
+                if (needsReload && this.$store.state.currentSite.config) {
+                    setTimeout(() => {
+                        // Reload site data from backend
+                        mainProcessAPI.send('app-site-reload', {
+                            siteName: this.$store.state.currentSite.config.name
+                        });
+                        mainProcessAPI.receiveOnce('app-site-reloaded', (result) => {
+                            this.$store.commit('setSiteConfig', result);
+                            this.$store.commit('switchSite', result.data);
+                            console.log('[MCP] Site data reloaded after MCP activity:', activity.tool);
+                        });
+                    }, 500);
+                }
+
+                // Also emit refresh event for any component-specific handling
                 const refreshEvent = this.getMcpRefreshEvent(activity.tool);
                 if (refreshEvent) {
                     setTimeout(() => {
@@ -356,6 +372,17 @@ mainProcessAPI.receive('app-data-loaded', function (initialData) {
                     return 'mcp-refresh-site';
                 }
                 return null;
+            },
+            mcpActivityNeedsReload (tool) {
+                // Determine if an MCP tool call requires reloading site data
+                // Read-only operations don't need a reload
+                const readOnlyTools = ['list_', 'get_'];
+                if (readOnlyTools.some(prefix => tool.startsWith(prefix))) {
+                    return false;
+                }
+                // Content-modifying tools need a reload
+                const modifyingPatterns = ['create_', 'update_', 'delete_', 'upload_', 'set_', 'add_', 'remove_', 'clear_'];
+                return modifyingPatterns.some(pattern => tool.includes(pattern));
             },
             async setupAppTheme () {
                 let currentTheme = this.$store.state.app.theme;
