@@ -72,8 +72,6 @@ class MCPEvents {
             if (appInstance.mainWindow && !appInstance.mainWindow.isDestroyed()) {
               console.log('[MCP Events] Sending to frontend:', entry.summary);
               appInstance.mainWindow.webContents.send('app-mcp-activity', entry);
-            } else {
-              console.log('[MCP Events] No valid mainWindow to send to');
             }
           }
         }
@@ -212,6 +210,8 @@ class MCPEvents {
           active: false,
           clients: [],
           totalToolCalls: 0,
+          // Lock status for database write operations
+          activeLock: null,
           // Legacy fields for backward compatibility
           pid: null,
           startedAt: null,
@@ -223,6 +223,51 @@ class MCPEvents {
 
         if (fs.existsSync(statusFile)) {
           const data = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+
+          // Process active lock if present
+          if (data.activeLock) {
+            const lock = data.activeLock;
+            const lockAge = Date.now() - (lock.startedAt || 0);
+            let lockProcessRunning = false;
+
+            // Check if lock holder process is still running
+            if (lock.pid) {
+              try {
+                process.kill(lock.pid, 0);
+                lockProcessRunning = true;
+              } catch (e) {
+                lockProcessRunning = false;
+              }
+            }
+
+            // Lock is valid if: process is running AND lock is less than 60 seconds old
+            if (lockProcessRunning && lockAge < 60000) {
+              status.activeLock = {
+                ...lock,
+                lockAge: lockAge,
+                lockAgeSeconds: Math.floor(lockAge / 1000)
+              };
+            }
+            // If lock is stale (process dead or too old), it will be cleaned up by CLI
+          }
+
+          // Process lastLock - show recently completed locks briefly
+          // This ensures the UI can display locks that completed between polls
+          if (data.lastLock && !status.activeLock) {
+            const lastLock = data.lastLock;
+            const timeSinceCleared = Date.now() - (lastLock.clearedAt || 0);
+
+            // Show lastLock for up to 3 seconds after it was cleared
+            if (timeSinceCleared < 3000) {
+              status.activeLock = {
+                ...lastLock,
+                isCompleted: true,
+                lockAge: lastLock.duration || 0,
+                lockAgeSeconds: Math.floor((lastLock.duration || 0) / 1000),
+                timeSinceCleared: timeSinceCleared
+              };
+            }
+          }
 
           // Handle new multi-client format
           if (Array.isArray(data.clients)) {

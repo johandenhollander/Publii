@@ -45,7 +45,7 @@ class MediaTools {
       },
       {
         name: 'upload_image',
-        description: 'Upload an image using Publii\'s native image handling (with responsive images and thumbnails)',
+        description: 'Upload an image using Publii\'s native image handling (with responsive images and thumbnails). Returns a file:/// URL for use in post content. For block editor: use the returned "url" field in your image block content, along with imageWidth and imageHeight. Available imageAlign options: "center" (default), "wide", "full". Example workflow: 1) upload_image with postId=0, 2) Create post with block: {"type":"publii-image","content":{"image":"<url from response>","imageWidth":800,"imageHeight":600,"alt":"","caption":""},"config":{"imageAlign":"center"}}',
         inputSchema: {
           type: 'object',
           properties: {
@@ -59,11 +59,12 @@ class MediaTools {
             },
             postId: {
               type: 'number',
-              description: 'Post ID to associate the image with (0 for temp)'
+              description: 'Post ID to associate the image with. Use 0 for new posts (images go to temp directory). Use existing post ID to add images to that post\'s directory.',
+              default: 0
             },
             imageType: {
               type: 'string',
-              description: 'Image type: contentImages, galleryImages, optionImages',
+              description: 'Image type: contentImages (default, for post content), galleryImages (for galleries), optionImages (for theme options)',
               enum: ['contentImages', 'galleryImages', 'optionImages'],
               default: 'contentImages'
             }
@@ -266,7 +267,8 @@ class MediaTools {
 
       // Use Publii's Image class to save with responsive generation
       // The helper works for all image types: contentImages, galleryImages, featuredImages, etc.
-      const itemId = postId === 0 ? 'temp' : postId;
+      // Use 0 for new posts - the Image class internally converts this to 'temp' directory
+      const itemId = postId === 0 ? 0 : postId;
 
       const result = await saveFeaturedImage(
         sourcePath,
@@ -297,9 +299,8 @@ class MediaTools {
             message: `Image uploaded with responsive versions`,
             url: result.featuredImage,
             filename: result.featuredImageFilename,
-            dimensions: `${width}x${height}`,
-            width: width,
-            height: height,
+            imageWidth: width,
+            imageHeight: height,
             site: site,
             postId: postId,
             imageType: imageType

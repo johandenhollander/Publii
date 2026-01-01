@@ -166,6 +166,41 @@ You'll see:
 - Real-time activity log
 - Automatic data refresh on MCP changes
 
+## Database Lock Status
+
+The MCP server implements a visual lock indicator to show when it's writing to the database. This helps prevent conflicts between MCP operations and the Publii UI.
+
+### Status Indicator
+
+Look for the MCP status indicator in the Publii sidebar:
+
+| Status | Indicator | Meaning |
+|--------|-----------|---------|
+| 🔴 **Red (fast pulse)** | Locked | MCP is writing to database |
+| 🟢 **Bright Green (scale)** | Completed | Write just finished |
+| 🟢 **Green (slow pulse)** | Active | MCP connected, idle |
+| 🟡 **Yellow** | Idle | MCP connected, no recent activity |
+| ⚫ **Gray** | Inactive | No MCP connection |
+
+The "completed" state is shown for 3 seconds after each write operation, so you'll always see feedback even for fast operations.
+
+### When Does Locking Occur?
+
+The lock is active during write operations:
+
+- **Posts**: `create_post`, `update_post`, `delete_post`
+- **Pages**: `create_page`, `update_page`, `delete_page`
+- **Tags**: `create_tag`, `update_tag`, `delete_tag`
+- **Media**: `upload_image`, `upload_file`, `delete_media`
+
+Read operations (`list_*`, `get_*`) do not acquire locks.
+
+### Lock Safety
+
+- Locks are automatically released after each operation
+- Stale locks (from crashed processes) are detected and ignored
+- Locks older than 60 seconds are automatically invalidated
+
 ## Troubleshooting
 
 ### "Cannot find module" error
@@ -180,7 +215,16 @@ npm install
 ### "Database is locked" error
 
 This can happen when Publii and the MCP server access the database simultaneously.
-The MCP server has a built-in 500ms delay to prevent this.
+
+**Prevention:**
+- The MCP server shows a red lock indicator when writing (see [Database Lock Status](#database-lock-status))
+- Wait for the indicator to turn green before editing in Publii
+- The MCP server queues requests to prevent concurrent writes
+
+**If it happens:**
+- Wait a few seconds and retry the operation
+- Check if the MCP status indicator shows a lock (red)
+- Restart Publii if the issue persists
 
 ### Claude doesn't see the tools
 

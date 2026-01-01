@@ -309,16 +309,14 @@ mainProcessAPI.receive('app-data-loaded', function (initialData) {
                 const needsReload = this.mcpActivityNeedsReload(activity.tool);
                 if (needsReload && this.$store.state.currentSite.config) {
                     setTimeout(() => {
-                        // Reload site data from backend
                         mainProcessAPI.send('app-site-reload', {
                             siteName: this.$store.state.currentSite.config.name
                         });
                         mainProcessAPI.receiveOnce('app-site-reloaded', (result) => {
                             this.$store.commit('setSiteConfig', result);
                             this.$store.commit('switchSite', result.data);
-                            console.log('[MCP] Site data reloaded after MCP activity:', activity.tool);
                         });
-                    }, 500);
+                    }, 1000);
                 }
 
                 // Also emit refresh event for any component-specific handling

@@ -12,6 +12,7 @@ const Page = require('../../page.js');
 const slugify = require('../../helpers/slug.js');
 const normalizePath = require('normalize-path');
 const { saveFeaturedImage } = require('../helpers/featured-image.js');
+const BlockEditorHelper = require('../helpers/block-editor.js');
 
 class PageTools {
   /**
@@ -80,9 +81,9 @@ class PageTools {
             },
             status: {
               type: 'string',
-              description: 'Page status',
+              description: 'Page status. Defaults to "published" when created via MCP',
               enum: ['published', 'draft', 'hidden'],
-              default: 'draft'
+              default: 'published'
             },
             author: {
               type: 'number',
@@ -353,7 +354,7 @@ class PageTools {
       const pageSlug = args.slug || slugify(args.title);
 
       // Pages have status with 'is-page' suffix
-      const baseStatus = args.status || 'draft';
+      const baseStatus = args.status || 'published';
 
       // Handle featured image if provided - use Publii's Image class for responsive generation
       let featuredImage = '';
@@ -362,12 +363,12 @@ class PageTools {
 
       if (args.featuredImage) {
         // Use Publii's Image class to save image with responsive versions
-        // For new pages, use 'temp' as ID - Page.save() will move files to final location
+        // For new pages, use 0 as ID - Image class converts 0 to 'temp' directory
         const imageResult = await saveFeaturedImage(
           args.featuredImage,
           appInstance,
           args.site,
-          'temp',  // New pages use temp directory
+          0,  // 0 = new page, Image class will use 'temp' directory
           'featuredImages'
         );
 
@@ -382,12 +383,26 @@ class PageTools {
         console.error(`[MCP] Saved featured image with responsive versions: ${featuredImageFilename}`);
       }
 
+      // Transform block editor content if needed
+      let pageText = args.text;
+      const editorType = args.editor || 'tinymce';
+
+      if (editorType === 'blockeditor') {
+        const sitePath = path.join(appInstance.sitesDir, args.site);
+        pageText = BlockEditorHelper.transformContent(args.text, {
+          sitePath: sitePath,
+          postId: 0,  // New page uses temp directory
+          db: null    // Images will be registered after page is saved
+        });
+        console.error('[MCP] Transformed block editor content for new page');
+      }
+
       const pageData = {
         site: args.site,
         id: 0, // 0 = new page
         title: args.title,
         slug: pageSlug,
-        text: args.text,
+        text: pageText,
         author: args.author || 1,
         status: baseStatus,
         creationDate: now,
@@ -401,13 +416,43 @@ class PageTools {
           metaDesc: '',
           metaRobots: 'index, follow',
           canonicalUrl: '',
-          editor: args.editor || 'tinymce'
+          editor: editorType
         },
         pageViewSettings: {}
       };
 
       const page = new Page(appInstance, pageData);
       const result = page.save();
+
+      // Fix block editor image URLs: Page.save() produces #DOMAIN_NAME#/filename
+      // but it should be #DOMAIN_NAME#filename (without the slash)
+      if (editorType === 'blockeditor' && result.pageID) {
+        try {
+          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = ?').get(result.pageID);
+          if (fixedText && fixedText.text && fixedText.text.includes('#DOMAIN_NAME#/')) {
+            const correctedText = fixedText.text.replace(/#DOMAIN_NAME#\//g, '#DOMAIN_NAME#');
+            appInstance.db.prepare('UPDATE posts SET text = ? WHERE id = ?').run(correctedText, result.pageID);
+            console.error('[MCP] Fixed block editor image URLs for page', result.pageID);
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not fix image URLs:', e.message);
+        }
+      }
+
+      // Register content images for block editor pages
+      if (editorType === 'blockeditor' && result.pageID) {
+        try {
+          const sitePath = path.join(appInstance.sitesDir, args.site);
+          BlockEditorHelper.registerContentImagesFromText(
+            appInstance.db,
+            result.pageID,
+            pageText,
+            sitePath
+          );
+        } catch (e) {
+          console.error('[MCP] Warning: Could not register content images:', e.message);
+        }
+      }
 
       console.error(`[MCP] Created page: ${args.title} (ID: ${result.pageID})`);
 
@@ -512,6 +557,21 @@ class PageTools {
         }
       }
 
+      // Determine editor type
+      const editorType = args.editor !== undefined ? args.editor : (existingData.additionalData?.editor || 'tinymce');
+
+      // Transform block editor content if text is being updated
+      let pageText = args.text !== undefined ? args.text : existing.text;
+      if (args.text !== undefined && editorType === 'blockeditor') {
+        const sitePath = path.join(appInstance.sitesDir, args.site);
+        pageText = BlockEditorHelper.transformContent(args.text, {
+          sitePath: sitePath,
+          postId: args.id,  // Existing page ID
+          db: appInstance.db
+        });
+        console.error('[MCP] Transformed block editor content for page update');
+      }
+
       // Merge existing data with updates
       // Note: DB columns are: id, title, authors, slug, text, featured_image_id, created_at, modified_at, status, template
       const pageData = {
@@ -519,7 +579,7 @@ class PageTools {
         id: args.id,
         title: args.title !== undefined ? args.title : existing.title,
         slug: args.slug !== undefined ? args.slug : existing.slug,
-        text: args.text !== undefined ? args.text : existing.text,
+        text: pageText,
         author: existing.authors,  // DB column is 'authors'
         status: args.status !== undefined ? args.status : existing.status.replace(',is-page', ''),
         creationDate: existing.created_at,  // DB column is 'created_at'
@@ -530,13 +590,28 @@ class PageTools {
         featuredImageData: featuredImageData,
         additionalData: {
           ...(existingData.additionalData || {}),  // From existingData, not existing
-          editor: args.editor !== undefined ? args.editor : (existingData.additionalData?.editor || 'tinymce')
+          editor: editorType
         },
         pageViewSettings: existingData.pageViewSettings || {}  // From existingData, not existing
       };
 
       const updatedPage = new Page(appInstance, pageData);
       const result = updatedPage.save();
+
+      // Fix block editor image URLs: Page.save() produces #DOMAIN_NAME#/filename
+      // but it should be #DOMAIN_NAME#filename (without the slash)
+      if (editorType === 'blockeditor') {
+        try {
+          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = ?').get(args.id);
+          if (fixedText && fixedText.text && fixedText.text.includes('#DOMAIN_NAME#/')) {
+            const correctedText = fixedText.text.replace(/#DOMAIN_NAME#\//g, '#DOMAIN_NAME#');
+            appInstance.db.prepare('UPDATE posts SET text = ? WHERE id = ?').run(correctedText, args.id);
+            console.error('[MCP] Fixed block editor image URLs for page', args.id);
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not fix image URLs:', e.message);
+        }
+      }
 
       console.error(`[MCP] Updated page: ${pageData.title} (ID: ${args.id})`);
 

@@ -13,6 +13,7 @@ const Posts = require('../../posts.js');
 const slugify = require('../../helpers/slug.js');
 const normalizePath = require('normalize-path');
 const { saveFeaturedImage } = require('../helpers/featured-image.js');
+const BlockEditorHelper = require('../helpers/block-editor.js');
 
 class PostTools {
   /**
@@ -73,7 +74,7 @@ class PostTools {
             },
             text: {
               type: 'string',
-              description: 'Post content as HTML (REQUIRED). Example: "<p>Hello world!</p><h2>Section</h2><p>More content...</p>"'
+              description: 'Post content as HTML (REQUIRED). Example: "<p>Hello world!</p><h2>Section</h2><p>More content...</p>". To include images: 1) First upload with upload_image (postId=0), 2) Use the returned file:/// URL in your HTML: <img src="file:///...temp/image.jpg">, 3) The URL is automatically converted to #DOMAIN_NAME# when saved.'
             },
             slug: {
               type: 'string',
@@ -81,9 +82,9 @@ class PostTools {
             },
             status: {
               type: 'string',
-              description: 'Publication status. Defaults to "draft"',
+              description: 'Publication status. Defaults to "published" when created via MCP',
               enum: ['published', 'draft', 'hidden'],
-              default: 'draft'
+              default: 'published'
             },
             author: {
               type: 'integer',
@@ -375,12 +376,12 @@ class PostTools {
 
       if (args.featuredImage) {
         // Use Publii's Image class to save image with responsive versions
-        // For new posts, use 'temp' as ID - Post.save() will move files to final location
+        // For new posts, use 0 as ID - Image class converts 0 to 'temp' directory
         const imageResult = await saveFeaturedImage(
           args.featuredImage,
           appInstance,
           args.site,
-          'temp',  // New posts use temp directory
+          0,  // 0 = new post, Image class will use 'temp' directory
           'featuredImages'
         );
 
@@ -395,14 +396,28 @@ class PostTools {
         console.error(`[MCP] Saved featured image with responsive versions: ${featuredImageFilename}`);
       }
 
+      // Transform block editor content if needed
+      let postText = args.text;
+      const editorType = args.editor || 'tinymce';
+
+      if (editorType === 'blockeditor') {
+        const sitePath = path.join(appInstance.sitesDir, args.site);
+        postText = BlockEditorHelper.transformContent(args.text, {
+          sitePath: sitePath,
+          postId: 0,  // New post uses temp directory
+          db: null    // Images will be registered after post is saved
+        });
+        console.error('[MCP] Transformed block editor content for new post');
+      }
+
       const postData = {
         site: args.site,
         id: 0, // 0 = new post
         title: args.title,
         slug: postSlug,
-        text: args.text,
+        text: postText,
         author: args.author || 1,
-        status: args.status || 'draft',
+        status: args.status || 'published',
         creationDate: now,
         modificationDate: now,
         template: args.template || '',
@@ -416,13 +431,43 @@ class PostTools {
           metaRobots: 'index, follow',
           canonicalUrl: '',
           mainTag: 0,
-          editor: args.editor || 'tinymce'
+          editor: editorType
         },
         postViewSettings: {}
       };
 
       const post = new Post(appInstance, postData);
       const result = post.save();
+
+      // Fix block editor image URLs: Post.save() produces #DOMAIN_NAME#/filename
+      // but it should be #DOMAIN_NAME#filename (without the slash)
+      if (editorType === 'blockeditor' && result.postID) {
+        try {
+          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = ?').get(result.postID);
+          if (fixedText && fixedText.text && fixedText.text.includes('#DOMAIN_NAME#/')) {
+            const correctedText = fixedText.text.replace(/#DOMAIN_NAME#\//g, '#DOMAIN_NAME#');
+            appInstance.db.prepare('UPDATE posts SET text = ? WHERE id = ?').run(correctedText, result.postID);
+            console.error('[MCP] Fixed block editor image URLs for post', result.postID);
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not fix image URLs:', e.message);
+        }
+      }
+
+      // Register content images for block editor posts
+      if (editorType === 'blockeditor' && result.postID) {
+        try {
+          const sitePath = path.join(appInstance.sitesDir, args.site);
+          BlockEditorHelper.registerContentImagesFromText(
+            appInstance.db,
+            result.postID,
+            postText,
+            sitePath
+          );
+        } catch (e) {
+          console.error('[MCP] Warning: Could not register content images:', e.message);
+        }
+      }
 
       console.error(`[MCP] Created post: ${args.title} (ID: ${result.postID})`);
 
@@ -530,6 +575,21 @@ class PostTools {
       // Extract tag IDs from the loaded tags data
       const existingTagIds = existingData.tags ? existingData.tags.map(t => t.id) : [];
 
+      // Determine editor type
+      const editorType = args.editor !== undefined ? args.editor : (existingData.additionalData?.editor || 'tinymce');
+
+      // Transform block editor content if text is being updated
+      let postText = args.text !== undefined ? args.text : existing.text;
+      if (args.text !== undefined && editorType === 'blockeditor') {
+        const sitePath = path.join(appInstance.sitesDir, args.site);
+        postText = BlockEditorHelper.transformContent(args.text, {
+          sitePath: sitePath,
+          postId: args.id,  // Existing post ID
+          db: appInstance.db
+        });
+        console.error('[MCP] Transformed block editor content for post update');
+      }
+
       // Merge existing data with updates
       // Note: DB columns are: id, title, authors, slug, text, featured_image_id, created_at, modified_at, status, template
       const postData = {
@@ -537,7 +597,7 @@ class PostTools {
         id: args.id,
         title: args.title !== undefined ? args.title : existing.title,
         slug: args.slug !== undefined ? args.slug : existing.slug,
-        text: args.text !== undefined ? args.text : existing.text,
+        text: postText,
         author: args.author !== undefined ? args.author : existing.authors,  // DB column is 'authors'
         status: args.status !== undefined ? args.status : existing.status,
         creationDate: existing.created_at,  // DB column is 'created_at'
@@ -549,13 +609,28 @@ class PostTools {
         featuredImageData: featuredImageData,
         additionalData: {
           ...(existingData.additionalData || {}),  // From existingData, not existing
-          editor: args.editor !== undefined ? args.editor : (existingData.additionalData?.editor || 'tinymce')
+          editor: editorType
         },
         postViewSettings: existingData.postViewSettings || {}  // From existingData, not existing
       };
 
       const updatedPost = new Post(appInstance, postData);
       const result = updatedPost.save();
+
+      // Fix block editor image URLs: Post.save() produces #DOMAIN_NAME#/filename
+      // but it should be #DOMAIN_NAME#filename (without the slash)
+      if (editorType === 'blockeditor') {
+        try {
+          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = ?').get(args.id);
+          if (fixedText && fixedText.text && fixedText.text.includes('#DOMAIN_NAME#/')) {
+            const correctedText = fixedText.text.replace(/#DOMAIN_NAME#\//g, '#DOMAIN_NAME#');
+            appInstance.db.prepare('UPDATE posts SET text = ? WHERE id = ?').run(correctedText, args.id);
+            console.error('[MCP] Fixed block editor image URLs for post', args.id);
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not fix image URLs:', e.message);
+        }
+      }
 
       console.error(`[MCP] Updated post: ${postData.title} (ID: ${args.id})`);
 

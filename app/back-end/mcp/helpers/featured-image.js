@@ -1,26 +1,31 @@
 /**
  * Image Helper for MCP Tools
  *
- * Uses Publii's Image class to properly save images and generate responsive versions.
+ * Uses Publii's worker process to save images and generate responsive versions.
  * This ensures MCP-created content has the same image handling as UI-created content.
  *
- * Supports all image types:
- * - featuredImages: Post/page hero images
- * - contentImages: Images in post/page content
- * - galleryImages: Images in galleries (thumbnail generation)
- * - optionImages: Theme option images
- * - tagImages/authorImages: Tag and author images
+ * Based on: app/back-end/events/image-uploader.js
  */
 
 const path = require('path');
 const fs = require('fs-extra');
-const Image = require('../../image.js');
+const childProcess = require('child_process');
 const sizeOf = require('image-size');
 const normalizePath = require('normalize-path');
 const slugify = require('../../helpers/slug.js');
 
+// Debug logging helper
+function debug(message, data = null) {
+  const timestamp = new Date().toISOString();
+  if (data) {
+    console.error(`[MCP ${timestamp}] ${message}`, JSON.stringify(data, null, 2));
+  } else {
+    console.error(`[MCP ${timestamp}] ${message}`);
+  }
+}
+
 /**
- * Save an image using Publii's Image class with responsive generation
+ * Save an image using Publii's worker process (same as UI)
  *
  * @param {string} sourcePath - Absolute path to the source image file
  * @param {Object} appInstance - Publii app instance with site info
@@ -30,9 +35,21 @@ const slugify = require('../../helpers/slug.js');
  * @returns {Promise<Object>} - { featuredImage, featuredImageFilename, dimensions }
  */
 async function saveFeaturedImage(sourcePath, appInstance, siteName, itemId, imageType = 'featuredImages') {
+  debug(`saveFeaturedImage called`, { sourcePath, siteName, itemId, imageType });
+
   // Validate source file exists
   if (!sourcePath || !fs.existsSync(sourcePath)) {
+    debug(`ERROR: Image file not found: ${sourcePath}`);
     throw new Error(`Image file not found: ${sourcePath}`);
+  }
+
+  // Get image dimensions before processing
+  let originalDimensions = { width: 0, height: 0 };
+  try {
+    originalDimensions = sizeOf(sourcePath);
+    debug(`Original image dimensions: ${originalDimensions.width}x${originalDimensions.height}`);
+  } catch (e) {
+    debug(`WARNING: Could not read original image dimensions: ${e.message}`);
   }
 
   // Ensure appConfig exists with resizeEngine (required by Image class)
@@ -42,122 +59,80 @@ async function saveFeaturedImage(sourcePath, appInstance, siteName, itemId, imag
     appInstance.appConfig.resizeEngine = 'sharp';
   }
 
-  // Create image data for Publii's Image class
-  const imageData = {
-    id: itemId,
-    path: sourcePath,
-    imageType: imageType,
-    site: siteName
-  };
-
-  // Create Image instance using Publii's class
-  const image = new Image(appInstance, imageData);
-
-  // Store original itemId since Image class converts 'temp' to NaN via parseInt
-  const originalItemId = itemId;
-
-  // Save image to correct location based on type
-  const result = await saveImageToDirectory(image, imageType, originalItemId);
-
-  if (!result || !result.newPath) {
-    throw new Error('Failed to save image');
-  }
-
-  // Generate responsive images using Publii's method
-  const promises = image.createResponsiveImages(result.newPath, imageType);
-
-  if (promises && promises.length > 0) {
-    try {
-      await Promise.all(promises);
-      console.error(`[MCP] Generated ${promises.length} responsive images for: ${result.filename}`);
-    } catch (err) {
-      console.error('[MCP] Warning: Some responsive images may not have been generated:', err.message);
-    }
-  } else {
-    console.error(`[MCP] No responsive images configured for type: ${imageType}`);
-  }
-
-  return {
-    featuredImage: result.url,
-    featuredImageFilename: result.filename,
-    dimensions: result.size
-  };
-}
-
-/**
- * Save image to the correct directory based on image type
- * @param {Object} imageInstance - Image instance with siteDir and path
- * @param {string} imageType - Type of image (featuredImages, contentImages, etc.)
- * @param {number|string} originalItemId - Original item ID (preserves 'temp' or actual ID)
- */
-function saveImageToDirectory(imageInstance, imageType, originalItemId) {
+  // Use Publii's worker process for image handling (same as UI)
   return new Promise((resolve, reject) => {
-    try {
-      // Use originalItemId to avoid NaN from parseInt('temp')
-      const idStr = originalItemId.toString();
-      let dirPath;
-      let responsiveDirPath;
+    const workerPath = path.join(__dirname, '../../workers/thumbnails/post-images.js');
+    debug(`Forking worker: ${workerPath}`);
 
-      // Determine directory based on image type (mirrors Image.save() logic)
-      switch (imageType) {
-        case 'galleryImages':
-          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'posts', idStr, 'gallery');
-          responsiveDirPath = null;  // Gallery images don't have separate responsive dir
-          break;
+    const imageProcess = childProcess.fork(workerPath);
 
-        case 'tagImages':
-          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'tags', idStr);
-          responsiveDirPath = path.join(dirPath, 'responsive');
-          break;
+    // Prepare image data (same format as UI sends)
+    const imageData = {
+      id: itemId === 0 ? 0 : itemId,  // 0 means temp directory
+      path: sourcePath,
+      imageType: imageType,
+      site: siteName
+    };
 
-        case 'authorImages':
-          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'authors', idStr);
-          responsiveDirPath = path.join(dirPath, 'responsive');
-          break;
+    // Send dependencies to worker (same as image-uploader.js)
+    imageProcess.send({
+      type: 'dependencies',
+      appInstance: {
+        appConfig: appInstance.appConfig,
+        appDir: appInstance.appDir,
+        sitesDir: appInstance.sitesDir,
+        db: appInstance.db
+      },
+      imageData: imageData
+    });
 
-        case 'optionImages':
-          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'website');
-          responsiveDirPath = path.join(dirPath, 'responsive');
-          break;
+    debug(`Sent dependencies to worker`, { imageData });
 
-        default:  // featuredImages, contentImages
-          dirPath = path.join(imageInstance.siteDir, 'input', 'media', 'posts', idStr);
-          responsiveDirPath = path.join(dirPath, 'responsive');
+    // Handle worker messages
+    imageProcess.on('message', function(data) {
+      debug(`Worker message received`, { type: data.type });
+
+      if (data.type === 'image-copied') {
+        debug(`Image copied, starting responsive image generation`);
+        imageProcess.send({
+          type: 'start-regenerating'
+        });
+      } else if (data.type === 'finished') {
+        debug(`Worker finished`, data.result);
+
+        const baseImage = data.result.baseImage || data.result;
+        const filename = baseImage.filename || path.basename(sourcePath);
+
+        resolve({
+          featuredImage: baseImage.url,
+          featuredImageFilename: filename,
+          dimensions: [originalDimensions.width, originalDimensions.height],
+          thumbnailPath: data.result.thumbnailPath,
+          thumbnailDimensions: data.result.thumbnailDimensions
+        });
       }
+    });
 
-      // Ensure directories exist
-      fs.ensureDirSync(dirPath);
-      if (responsiveDirPath) {
-        fs.ensureDirSync(responsiveDirPath);
+    // Handle worker errors
+    imageProcess.on('error', function(err) {
+      debug(`Worker error: ${err.message}`);
+      reject(new Error(`Image worker error: ${err.message}`));
+    });
+
+    // Handle worker exit without finish message
+    imageProcess.on('exit', function(code) {
+      if (code !== 0) {
+        debug(`Worker exited with code ${code}`);
+        // Don't reject here - the worker exits after sending 'finished'
       }
+    });
 
-      // Generate clean filename
-      const fileName = path.basename(imageInstance.path);
-      const fileNameData = path.parse(fileName);
-      const finalFileName = slugify(fileNameData.name, false, true) + fileNameData.ext;
-      const destPath = path.join(dirPath, finalFileName);
-
-      // Copy file synchronously
-      fs.copySync(imageInstance.path, destPath);
-
-      // Get dimensions
-      let dimensions = [0, 0];
-      try {
-        const size = sizeOf(destPath);
-        dimensions = [size.width, size.height];
-      } catch (e) {
-        console.error('[MCP] Warning: Could not read image dimensions');
-      }
-
-      resolve({
-        size: dimensions,
-        url: 'file:///' + normalizePath(destPath),
-        filename: finalFileName,
-        newPath: destPath
-      });
-    } catch (err) {
-      reject(err);
-    }
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      debug(`Worker timeout - killing process`);
+      imageProcess.kill();
+      reject(new Error('Image processing timeout after 30 seconds'));
+    }, 30000);
   });
 }
 
@@ -165,19 +140,22 @@ function saveImageToDirectory(imageInstance, imageType, originalItemId) {
  * Remove featured image files for a post/page
  */
 function removeFeaturedImage(appInstance, siteName, itemId) {
+  debug(`removeFeaturedImage called`, { siteName, itemId });
+
   const dirPath = path.join(appInstance.sitesDir, siteName, 'input', 'media', 'posts', itemId.toString());
   const responsiveDirPath = path.join(dirPath, 'responsive');
 
   // Remove responsive images
   if (fs.existsSync(responsiveDirPath)) {
     fs.emptyDirSync(responsiveDirPath);
+    debug(`Cleared responsive images directory: ${responsiveDirPath}`);
   }
 
-  // Note: We don't remove the main image dir as it may contain other images
-  console.error(`[MCP] Cleared responsive images for item ${itemId}`);
+  debug(`Finished removing featured image for item ${itemId}`);
 }
 
 module.exports = {
   saveFeaturedImage,
-  removeFeaturedImage
+  removeFeaturedImage,
+  debug  // Export for use in other MCP modules
 };

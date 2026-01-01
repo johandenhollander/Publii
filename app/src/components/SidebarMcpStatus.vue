@@ -21,10 +21,12 @@ export default {
                 toolCalls: 0,
                 lastActivity: null,
                 isStale: true,
-                processRunning: false
+                processRunning: false,
+                activeLock: null
             },
             showDetails: false,
-            pollInterval: null
+            pollInterval: null,
+            fastPollInterval: null
         };
     },
     computed: {
@@ -35,15 +37,31 @@ export default {
         isActive() {
             return this.mcpStatus.active && this.mcpStatus.processRunning && !this.mcpStatus.isStale;
         },
+        isLocked() {
+            return this.mcpStatus.activeLock !== null && this.mcpStatus.activeLock !== undefined;
+        },
+        isLockCompleted() {
+            return this.isLocked && this.mcpStatus.activeLock.isCompleted;
+        },
         statusClasses() {
             return {
                 'mcp-status': true,
-                'mcp-status-active': this.isActive,
-                'mcp-status-idle': this.mcpStatus.active && this.mcpStatus.isStale,
-                'mcp-status-inactive': !this.mcpStatus.active
+                'mcp-status-completed': this.isLockCompleted,
+                'mcp-status-locked': this.isLocked && !this.isLockCompleted,
+                'mcp-status-active': this.isActive && !this.isLocked,
+                'mcp-status-idle': this.mcpStatus.active && this.mcpStatus.isStale && !this.isLocked,
+                'mcp-status-inactive': !this.mcpStatus.active && !this.isLocked
             };
         },
         statusTitle() {
+            if (this.isLockCompleted) {
+                const lock = this.mcpStatus.activeLock;
+                return `MCP completed: ${lock.operation} on ${lock.site} (${lock.duration || 0}ms)`;
+            }
+            if (this.isLocked) {
+                const lock = this.mcpStatus.activeLock;
+                return `MCP writing: ${lock.operation} on ${lock.site}`;
+            }
             if (this.isActive) {
                 return this.$t('mcp.statusActive');
             } else if (this.mcpStatus.active && this.mcpStatus.isStale) {
@@ -52,6 +70,14 @@ export default {
             return this.$t('mcp.statusInactive');
         },
         statusDetails() {
+            if (this.isLockCompleted) {
+                const lock = this.mcpStatus.activeLock;
+                return `✓ ${lock.operation}`;
+            }
+            if (this.isLocked) {
+                const lock = this.mcpStatus.activeLock;
+                return `${lock.operation}...`;
+            }
             if (!this.mcpStatus.lastActivity) {
                 return '';
             }
@@ -68,8 +94,31 @@ export default {
         checkStatus() {
             mainProcessAPI.send('app-mcp-cli-status');
             mainProcessAPI.receiveOnce('app-mcp-cli-status-result', (status) => {
+                const hadLock = this.isLocked;
                 this.mcpStatus = status;
+
+                // Start fast polling when lock is detected
+                if (this.isLocked && !this.fastPollInterval) {
+                    this.startFastPolling();
+                }
+                // Stop fast polling when no lock activity
+                if (!this.isLocked && this.fastPollInterval) {
+                    this.stopFastPolling();
+                }
             });
+        },
+        startFastPolling() {
+            if (this.fastPollInterval) return;
+            // Poll every 500ms during lock activity
+            this.fastPollInterval = setInterval(() => {
+                this.checkStatus();
+            }, 500);
+        },
+        stopFastPolling() {
+            if (this.fastPollInterval) {
+                clearInterval(this.fastPollInterval);
+                this.fastPollInterval = null;
+            }
         },
         toggleDetails() {
             this.showDetails = !this.showDetails;
@@ -79,15 +128,16 @@ export default {
         // Check status immediately
         this.checkStatus();
 
-        // Poll every 5 seconds
+        // Poll every 2 seconds (faster to catch locks)
         this.pollInterval = setInterval(() => {
             this.checkStatus();
-        }, 5000);
+        }, 2000);
     },
     beforeDestroy() {
         if (this.pollInterval) {
             clearInterval(this.pollInterval);
         }
+        this.stopFastPolling();
     }
 };
 </script>
@@ -134,6 +184,31 @@ export default {
         opacity: 0.8;
     }
 
+    &-locked {
+        .mcp-status-dot {
+            background: #ef4444;
+            box-shadow: 0 0 6px #ef4444;
+            animation: pulse-red 0.5s infinite;
+        }
+        .mcp-status-text {
+            color: #fca5a5;
+        }
+    }
+
+    &-completed {
+        .mcp-status-dot {
+            background: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+            animation: pulse-complete 0.3s ease-out;
+        }
+        .mcp-status-text {
+            color: #86efac;
+        }
+        .mcp-status-details {
+            color: #86efac;
+        }
+    }
+
     &-active {
         .mcp-status-dot {
             background: #4ade80;
@@ -152,6 +227,30 @@ export default {
         .mcp-status-dot {
             background: #6b7280;
         }
+    }
+}
+
+@keyframes pulse-red {
+    0%, 100% {
+        box-shadow: 0 0 6px #ef4444;
+    }
+    50% {
+        box-shadow: 0 0 12px #ef4444;
+    }
+}
+
+@keyframes pulse-complete {
+    0% {
+        transform: scale(1);
+        box-shadow: 0 0 4px #22c55e;
+    }
+    50% {
+        transform: scale(1.3);
+        box-shadow: 0 0 12px #22c55e;
+    }
+    100% {
+        transform: scale(1);
+        box-shadow: 0 0 8px #22c55e;
     }
 }
 

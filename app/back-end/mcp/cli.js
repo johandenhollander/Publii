@@ -35,6 +35,7 @@ const PageTools = require('./tools/pages.js');
 const TagTools = require('./tools/tags.js');
 const MenuTools = require('./tools/menus.js');
 const MediaTools = require('./tools/media.js');
+const DeployTools = require('./tools/deploy.js');
 
 // Setup Publii data directory
 const dataDir = path.join(os.homedir(), 'Documents', 'Publii');
@@ -50,6 +51,51 @@ const MAX_ACTIVITY_LOG_ENTRIES = 100;
 const sessionId = crypto.randomUUID();
 let toolCallCount = 0;
 const startedAt = Date.now();
+
+// Request queue for sequential processing (prevents database locks)
+let requestQueue = Promise.resolve();
+let activeRequest = null;
+
+// Debug logging levels
+const DEBUG_LEVELS = {
+  ERROR: 0,
+  WARN: 1,
+  INFO: 2,
+  DEBUG: 3,
+  TRACE: 4
+};
+
+const DEBUG_LEVEL = process.env.MCP_DEBUG_LEVEL
+  ? DEBUG_LEVELS[process.env.MCP_DEBUG_LEVEL.toUpperCase()] || DEBUG_LEVELS.INFO
+  : DEBUG_LEVELS.INFO;
+
+/**
+ * Debug logging helper with levels
+ */
+function debug(level, message, data = null) {
+  if (DEBUG_LEVELS[level] > DEBUG_LEVEL) return;
+
+  const timestamp = new Date().toISOString();
+  const prefix = `[MCP ${timestamp}] [${level}]`;
+
+  if (data !== null) {
+    // Truncate large data for readability
+    const dataStr = JSON.stringify(data, null, 2);
+    const truncated = dataStr.length > 1000 ? dataStr.substring(0, 1000) + '...(truncated)' : dataStr;
+    console.error(`${prefix} ${message}`, truncated);
+  } else {
+    console.error(`${prefix} ${message}`);
+  }
+}
+
+// Convenience logging functions
+const log = {
+  error: (msg, data) => debug('ERROR', msg, data),
+  warn: (msg, data) => debug('WARN', msg, data),
+  info: (msg, data) => debug('INFO', msg, data),
+  debug: (msg, data) => debug('DEBUG', msg, data),
+  trace: (msg, data) => debug('TRACE', msg, data)
+};
 
 /**
  * Get parent PID from /proc (Linux only)
@@ -206,7 +252,7 @@ function updateStatusFile() {
 
     fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
   } catch (e) {
-    console.error('[MCP] Error writing status file:', e.message);
+    log.warn('Error writing status file:', { error: e.message });
   }
 }
 
@@ -217,10 +263,76 @@ function removeSession() {
   try {
     const status = readStatusFile();
     status.clients = status.clients.filter(c => c.sessionId !== sessionId);
+    // Also clear any lock held by this session
+    if (status.activeLock && status.activeLock.sessionId === sessionId) {
+      delete status.activeLock;
+    }
     fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
   } catch (e) {
-    console.error('[MCP] Error removing session:', e.message);
+    log.warn('Error removing session:', { error: e.message });
   }
+}
+
+/**
+ * Set database lock for a site operation
+ * This notifies the Publii UI that MCP is writing to the database
+ */
+function setLock(site, operation) {
+  try {
+    const status = readStatusFile();
+    status.activeLock = {
+      sessionId: sessionId,
+      clientName: clientName,
+      pid: process.pid,
+      site: site,
+      operation: operation,
+      startedAt: Date.now()
+    };
+    fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
+    log.debug(`Lock set: ${operation} on ${site}`);
+  } catch (e) {
+    log.warn('Error setting lock:', { error: e.message });
+  }
+}
+
+/**
+ * Clear database lock
+ * Stores the lock info in lastLock so UI can display it briefly after completion
+ */
+function clearLock() {
+  try {
+    const status = readStatusFile();
+    if (status.activeLock && status.activeLock.sessionId === sessionId) {
+      const lockInfo = `${status.activeLock.operation} on ${status.activeLock.site}`;
+
+      // Store as lastLock so UI can show it briefly after completion
+      status.lastLock = {
+        ...status.activeLock,
+        clearedAt: Date.now(),
+        duration: Date.now() - status.activeLock.startedAt
+      };
+
+      delete status.activeLock;
+      fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
+      log.debug(`Lock cleared: ${lockInfo} (${status.lastLock.duration}ms)`);
+    }
+  } catch (e) {
+    log.warn('Error clearing lock:', { error: e.message });
+  }
+}
+
+/**
+ * Check if an operation requires database write (needs lock)
+ */
+function isWriteOperation(toolName) {
+  const writeOperations = [
+    'create_post', 'update_post', 'delete_post',
+    'create_page', 'update_page', 'delete_page',
+    'create_tag', 'update_tag', 'delete_tag',
+    'upload_image', 'upload_file', 'delete_media',
+    'render_site', 'deploy_site'
+  ];
+  return writeOperations.includes(toolName);
 }
 
 /**
@@ -242,7 +354,7 @@ function readActivityLog() {
  */
 function logActivity(toolName, args = {}) {
   try {
-    const log = readActivityLog();
+    const activityLog = readActivityLog();
 
     // Create log entry
     const entry = {
@@ -255,16 +367,16 @@ function logActivity(toolName, args = {}) {
     };
 
     // Add to beginning of array
-    log.entries.unshift(entry);
+    activityLog.entries.unshift(entry);
 
     // Trim to max entries
-    if (log.entries.length > MAX_ACTIVITY_LOG_ENTRIES) {
-      log.entries = log.entries.slice(0, MAX_ACTIVITY_LOG_ENTRIES);
+    if (activityLog.entries.length > MAX_ACTIVITY_LOG_ENTRIES) {
+      activityLog.entries = activityLog.entries.slice(0, MAX_ACTIVITY_LOG_ENTRIES);
     }
 
-    fs.writeFileSync(activityLogFile, JSON.stringify(log, null, 2));
+    fs.writeFileSync(activityLogFile, JSON.stringify(activityLog, null, 2));
   } catch (e) {
-    console.error('[MCP] Error logging activity:', e.message);
+    log.warn('Error logging activity:', { error: e.message });
   }
 }
 
@@ -315,6 +427,12 @@ function formatActivitySummary(toolName, args) {
       return `${site} Upload image`;
     case 'upload_file':
       return `${site} Upload file`;
+    case 'render_site':
+      return `${site} Render site (generate HTML)`;
+    case 'deploy_site':
+      return `${site} Deploy site to server`;
+    case 'get_sync_status':
+      return `${site} Get sync status`;
     default:
       return `${site} ${toolName}`;
   }
@@ -332,7 +450,7 @@ function loadAppConfig() {
     try {
       return JSON.parse(fs.readFileSync(configPath, 'utf8'));
     } catch (e) {
-      console.error('[MCP] Error loading app config:', e.message);
+      log.error('Error loading app config:', { error: e.message });
     }
   }
   // Return defaults if config not found
@@ -347,7 +465,7 @@ function loadSites() {
   const sites = {};
 
   if (!fs.existsSync(sitesDir)) {
-    console.error(`[MCP] Publii sites directory not found: ${sitesDir}`);
+    log.warn(`Publii sites directory not found: ${sitesDir}`);
     return sites;
   }
 
@@ -363,7 +481,7 @@ function loadSites() {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         sites[siteName] = config;
       } catch (e) {
-        console.error(`[MCP] Error loading site config for ${siteName}:`, e.message);
+        log.warn(`Error loading site config for ${siteName}:`, { error: e.message });
       }
     }
   }
@@ -372,8 +490,11 @@ function loadSites() {
 }
 
 // Create app instance for MCP tools
+// Note: appDir should be the user data directory (~/Documents/Publii)
+// where plugins, themes, and sites are stored - NOT the installation directory
 const appInstance = {
-  appDir: path.join(__dirname, '..', '..'),
+  appDir: dataDir,  // User data directory (where plugins are stored)
+  basedir: path.join(__dirname, '..', '..'),  // Installation directory (for default files)
   sitesDir: sitesDir,
   sites: loadSites(),
   appConfig: loadAppConfig(),  // Required for Image class resizeEngine
@@ -382,11 +503,12 @@ const appInstance = {
 };
 
 async function main() {
-  console.error('[MCP] Starting Publii MCP Server (CLI mode)...');
-  console.error(`[MCP] Session: ${sessionId}`);
-  console.error(`[MCP] Client: ${clientName}`);
-  console.error(`[MCP] Publii data: ${dataDir}`);
-  console.error(`[MCP] Sites found: ${Object.keys(appInstance.sites).join(', ') || 'none'}`);
+  log.info('Starting Publii MCP Server (CLI mode)...');
+  log.info(`Session: ${sessionId}`);
+  log.info(`Client: ${clientName}`);
+  log.info(`Debug level: ${Object.keys(DEBUG_LEVELS).find(k => DEBUG_LEVELS[k] === DEBUG_LEVEL) || 'INFO'}`);
+  log.info(`Publii data: ${dataDir}`);
+  log.info(`Sites found: ${Object.keys(appInstance.sites).join(', ') || 'none'}`);
 
   // Write initial status
   updateStatusFile();
@@ -409,72 +531,107 @@ async function main() {
       ...PageTools.getToolDefinitions(),
       ...TagTools.getToolDefinitions(),
       ...MenuTools.getToolDefinitions(),
-      ...MediaTools.getToolDefinitions()
+      ...MediaTools.getToolDefinitions(),
+      ...DeployTools.getToolDefinitions()
     ];
 
     return { tools };
   });
 
-  // Handle tool calls
+  // Handle tool calls - queued for sequential processing
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    console.error(`[MCP] Tool called: ${name}`);
+    const requestId = ++toolCallCount;
 
-    // Update status and log activity
-    toolCallCount++;
-    updateStatusFile();
-    logActivity(name, args || {});
+    log.info(`Tool request #${requestId}: ${name}`, { args: args ? Object.keys(args) : [] });
 
-    try {
-      // Reload sites on each call (in case they changed)
-      appInstance.sites = loadSites();
+    // Queue this request to run after any pending requests complete
+    // This prevents database lock issues from parallel requests
+    const result = await new Promise((resolve, reject) => {
+      requestQueue = requestQueue.then(async () => {
+        activeRequest = { id: requestId, name, startedAt: Date.now() };
+        log.debug(`Starting request #${requestId}: ${name}`);
 
-      // Route to appropriate tool handler
-      if (name.startsWith('list_sites') || name.startsWith('get_site')) {
-        return await SiteTools.handleToolCall(name, args, appInstance);
-      }
+        try {
+          // Update status and log activity
+          updateStatusFile();
+          logActivity(name, args || {});
 
-      if (name === 'list_posts' || name === 'get_post' || name === 'create_post' || name === 'update_post' || name === 'delete_post') {
-        return await PostTools.handleToolCall(name, args, appInstance);
-      }
+          // Reload sites on each call (in case they changed)
+          appInstance.sites = loadSites();
 
-      if (name === 'list_pages' || name === 'get_page' || name === 'create_page' || name === 'update_page' || name === 'delete_page') {
-        return await PageTools.handleToolCall(name, args, appInstance);
-      }
+          // Set lock for write operations
+          const needsLock = isWriteOperation(name);
+          if (needsLock && args && args.site) {
+            setLock(args.site, name);
+          }
 
-      if (name === 'list_tags' || name === 'get_tag' || name === 'create_tag' || name === 'update_tag' || name === 'delete_tag') {
-        return await TagTools.handleToolCall(name, args, appInstance);
-      }
+          let toolResult;
 
-      if (name === 'get_menu' || name === 'set_menu' || name === 'add_menu_item' || name === 'remove_menu_item' || name === 'clear_menu') {
-        return await MenuTools.handleToolCall(name, args, appInstance);
-      }
+          try {
+            // Route to appropriate tool handler
+            if (name.startsWith('list_sites') || name.startsWith('get_site')) {
+              toolResult = await SiteTools.handleToolCall(name, args, appInstance);
+            } else if (name === 'list_posts' || name === 'get_post' || name === 'create_post' || name === 'update_post' || name === 'delete_post') {
+              toolResult = await PostTools.handleToolCall(name, args, appInstance);
+            } else if (name === 'list_pages' || name === 'get_page' || name === 'create_page' || name === 'update_page' || name === 'delete_page') {
+              toolResult = await PageTools.handleToolCall(name, args, appInstance);
+            } else if (name === 'list_tags' || name === 'get_tag' || name === 'create_tag' || name === 'update_tag' || name === 'delete_tag') {
+              toolResult = await TagTools.handleToolCall(name, args, appInstance);
+            } else if (name === 'get_menu' || name === 'set_menu' || name === 'add_menu_item' || name === 'remove_menu_item' || name === 'clear_menu') {
+              toolResult = await MenuTools.handleToolCall(name, args, appInstance);
+            } else if (name === 'list_media' || name === 'upload_image' || name === 'upload_file' || name === 'delete_media' || name === 'get_media_info') {
+              toolResult = await MediaTools.handleToolCall(name, args, appInstance);
+            } else if (name === 'render_site' || name === 'deploy_site' || name === 'get_sync_status') {
+              toolResult = await DeployTools.handleToolCall(name, args, appInstance);
+            } else {
+              throw new Error(`Unknown tool: ${name}`);
+            }
+          } finally {
+            // Always clear lock after operation (success or failure)
+            if (needsLock) {
+              clearLock();
+            }
+          }
 
-      if (name === 'list_media' || name === 'upload_image' || name === 'upload_file' || name === 'delete_media' || name === 'get_media_info') {
-        return await MediaTools.handleToolCall(name, args, appInstance);
-      }
+          const duration = Date.now() - activeRequest.startedAt;
+          log.info(`Completed request #${requestId}: ${name} (${duration}ms)`);
+          activeRequest = null;
 
-      throw new Error(`Unknown tool: ${name}`);
-    } catch (error) {
-      console.error(`[MCP] Tool error (${name}):`, error.message);
-      return {
-        content: [{
-          type: 'text',
-          text: `Error: ${error.message}`
-        }],
-        isError: true
-      };
-    }
+          resolve(toolResult);
+        } catch (error) {
+          const duration = Date.now() - activeRequest.startedAt;
+          log.error(`Failed request #${requestId}: ${name} (${duration}ms)`, { error: error.message, stack: error.stack });
+          activeRequest = null;
+
+          // Ensure lock is cleared on error
+          clearLock();
+
+          resolve({
+            content: [{
+              type: 'text',
+              text: `Error: ${error.message}`
+            }],
+            isError: true
+          });
+        }
+      }).catch(err => {
+        log.error(`Queue error for request #${requestId}`, { error: err.message });
+        reject(err);
+      });
+    });
+
+    return result;
   });
 
   // Connect via stdio
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error('[MCP] Server running on stdio');
+  log.info('Server running on stdio - ready for requests');
 }
 
 main().catch((error) => {
-  console.error('[MCP] Fatal error:', error);
+  log.error('Fatal error:', { error: error.message, stack: error.stack });
   process.exit(1);
 });
