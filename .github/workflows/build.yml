@@ -70,7 +70,7 @@ jobs:
         run: npm run prod
 
       - name: Prepare editor
-        run: npm run prepare-editor
+        run: npm run prepare-editor:win
 
       - name: Build Windows installer
         run: npx electron-builder build --win nsis --publish never
