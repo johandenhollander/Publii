@@ -28,6 +28,7 @@ const AstAppConfig = {
     experimentalFeatureAppAutoBeautifySourceCode: false,
     experimentalFeatureAppFtpAlt: false,
     experimentalFileManagerInSidebar: false,
+    experimentalMcpIntegration: false,
     uiZoomLevel: 1.0,
     notificationsStatus: false
 };

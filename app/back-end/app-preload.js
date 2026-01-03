@@ -1,4 +1,6 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
+// MCP channels (isolated for upstream compatibility)
+const McpChannels = require('./mcp/integration/preload-channels');
 
 contextBridge.exposeInMainWorld('mainProcessAPI', {
     shellShowItemInFolder: (url) => ipcRenderer.invoke('publii-shell-show-item-in-folder', url),
@@ -105,8 +107,7 @@ contextBridge.exposeInMainWorld('mainProcessAPI', {
             'app-get-notifications-file',
             'app-pages-hierarchy-update',
             'app-content-fields-update',
-            'app-mcp-cli-status',
-            'app-mcp-clear-activity-log'
+            ...McpChannels.send
         ];
 
         if (validChannels.includes(channel)) {
@@ -133,7 +134,7 @@ contextBridge.exposeInMainWorld('mainProcessAPI', {
             'block-editor-undo',
             'block-editor-redo',
             'no-remote-files',
-            'app-mcp-activity'
+            ...McpChannels.receive
         ];
 
         if (validChannels.includes(channel)) {
@@ -223,8 +224,7 @@ contextBridge.exposeInMainWorld('mainProcessAPI', {
             'app-site-plugin-deactivated',
             'app-site-get-plugin-config-retrieved',
             'app-content-fields-updated',
-            'app-mcp-cli-status-result',
-            'app-mcp-activity-log-cleared'
+            ...McpChannels.receiveOnce
         ];
 
         if (validChannels.includes(channel)) {

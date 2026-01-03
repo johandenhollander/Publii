@@ -25,30 +25,20 @@
 </template>
 
 <script>
+// MCP Mixin (isolated for upstream compatibility)
+import McpMixin from '../mcp/mixins/sidebar-mcp';
+
 export default {
     name: 'sidebar-menu',
+    mixins: [McpMixin],
     data () {
         let activeMenuItem = this.$route.path.endsWith('/pages/') ? 'pages' : 'posts';
 
         return {
-            activeMenuItem,
-            mcpStatus: {
-                active: false,
-                isStale: true,
-                processRunning: false
-            },
-            mcpPollInterval: null
+            activeMenuItem
         };
     },
     computed: {
-        mcpStatusClass () {
-            if (this.mcpStatus.active && this.mcpStatus.processRunning && !this.mcpStatus.isStale) {
-                return 'mcp-active';
-            } else if (this.mcpStatus.active && this.mcpStatus.isStale) {
-                return 'mcp-idle';
-            }
-            return 'mcp-inactive';
-        },
         items: function() {
             let siteName = this.$route.params.name;
             let menuItems = [{
@@ -97,13 +87,9 @@ export default {
                 });
             }
 
-            if (this.$store.state.app.config.experimentalMcpIntegration) {
-                menuItems.push({
-                    icon: 'mcp',
-                    label: 'MCP',
-                    url: '/site/' + siteName + '/mcp/',
-                    isMcp: true
-                });
+            // MCP menu item (from mixin)
+            if (this.mcpMenuItem) {
+                menuItems.push(this.mcpMenuItem);
             }
 
             return menuItems;
@@ -113,11 +99,11 @@ export default {
         '$route': function(newValue, oldValue) {
             let pathElements = newValue.path.split('/');
 
-            
+
 
             if (
-                pathElements[3] && 
-                pathElements[3] !== 'settings' && 
+                pathElements[3] &&
+                pathElements[3] !== 'settings' &&
                 !(pathElements[3] === 'tools' && pathElements[4] === 'file-manager' && this.$store.state.app.config.experimentalFileManagerInSidebar)
             ) {
                 this.setActiveMenuItem(pathElements[3]);
@@ -133,36 +119,22 @@ export default {
     methods: {
         setActiveMenuItem: function(newValue) {
             this.activeMenuItem = newValue;
-        },
-        checkMcpStatus () {
-            if (!this.$store.state.app.config.experimentalMcpIntegration) {
-                return;
-            }
-            mainProcessAPI.send('app-mcp-cli-status');
-            mainProcessAPI.receiveOnce('app-mcp-cli-status-result', (status) => {
-                this.mcpStatus = status;
-            });
         }
     },
     mounted () {
-        // Start polling MCP status if enabled
-        if (this.$store.state.app.config.experimentalMcpIntegration) {
-            this.checkMcpStatus();
-            this.mcpPollInterval = setInterval(() => {
-                this.checkMcpStatus();
-            }, 5000);
-        }
+        // Start MCP status polling (from mixin)
+        this.startMcpPolling();
     },
     beforeDestroy () {
-        if (this.mcpPollInterval) {
-            clearInterval(this.mcpPollInterval);
-        }
+        // Stop MCP status polling (from mixin)
+        this.stopMcpPolling();
     }
 }
 </script>
 
 <style lang="scss" scoped>
 @import '../scss/variables.scss';
+@import '../mcp/styles/_mcp-status.scss';
 
 .sidebar-menu {
     clear: both;
@@ -227,37 +199,6 @@ export default {
             margin-left: auto;
             padding: 2px;
         }
-    }
-}
-
-.mcp-status-dot {
-    border-radius: 50%;
-    display: inline-block;
-    height: 8px;
-    margin-left: auto;
-    width: 8px;
-
-    &.mcp-active {
-        background: #4ade80;
-        box-shadow: 0 0 6px #4ade80;
-        animation: mcp-pulse 2s infinite;
-    }
-
-    &.mcp-idle {
-        background: #fbbf24;
-    }
-
-    &.mcp-inactive {
-        background: #6b7280;
-    }
-}
-
-@keyframes mcp-pulse {
-    0%, 100% {
-        box-shadow: 0 0 6px #4ade80;
-    }
-    50% {
-        box-shadow: 0 0 12px #4ade80;
     }
 }
 

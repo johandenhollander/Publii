@@ -1,6 +1,16 @@
 /*
  * Module which loads all Event classes
  */
+
+// MCP Events (isolated - loaded conditionally)
+const McpEvents = (() => {
+    try {
+        return { MCPEvents: require('../mcp/events/mcp.js') };
+    } catch (e) {
+        return {}; // MCP not available
+    }
+})();
+
 module.exports = {
     AppEvents: require('./app.js'),
     ContentEvents: require('./content.js'),
@@ -23,5 +33,5 @@ module.exports = {
     FileManagerEvents: require('./file-manager.js'),
     PluginEvents: require('./plugin.js'),
     PluginsApiEvents: require('./plugins-api.js'),
-    MCPEvents: require('../mcp/events/mcp.js')
+    ...McpEvents
 };

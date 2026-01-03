@@ -1,0 +1,37 @@
+/**
+ * MCP Status Indicator Styles
+ *
+ * Isolated styles for MCP status dot in sidebar.
+ * Import in SidebarMenu.vue or global styles.
+ */
+
+.mcp-status-dot {
+    border-radius: 50%;
+    display: inline-block;
+    height: 8px;
+    margin-left: auto;
+    width: 8px;
+
+    &.mcp-active {
+        background: #4ade80;
+        box-shadow: 0 0 6px #4ade80;
+        animation: mcp-pulse 2s infinite;
+    }
+
+    &.mcp-idle {
+        background: #fbbf24;
+    }
+
+    &.mcp-inactive {
+        background: #6b7280;
+    }
+}
+
+@keyframes mcp-pulse {
+    0%, 100% {
+        box-shadow: 0 0 6px #4ade80;
+    }
+    50% {
+        box-shadow: 0 0 12px #4ade80;
+    }
+}

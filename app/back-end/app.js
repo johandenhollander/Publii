@@ -34,8 +34,8 @@ const defaultAstAppConfig = require('./../config/AST.app.config');
 const defaultAstCurrentSiteConfig = require('./../config/AST.currentSite.config');
 // Plugins packages
 const PluginsAPI = require('./modules/plugins/plugins-api.js');
-// MCP Server
-const PubliiMCPServer = require('./mcp/server.js');
+// MCP Integration (isolated for upstream compatibility)
+const { extendApp: extendAppWithMcp } = require('./mcp/integration');
 
 /**
  * Main app class
@@ -65,7 +65,6 @@ class App {
         this.app.sitesDir = null;
         this.db = false;
         this.pluginsAPI = new PluginsAPI();
-        this.mcpServer = null; // MCP server instance (initialized later)
 
         /*
          * Run the app
@@ -772,64 +771,9 @@ class App {
             this.mainWindow.webContents.setZoomFactor(zoom);
         }
     }
-
-    /**
-     * MCP Server Methods
-     */
-
-    /**
-     * Start MCP server
-     * Called via IPC event: app-mcp-start
-     */
-    async startMCPServer() {
-        console.log('[App] Starting MCP server...');
-
-        if (!this.mcpServer) {
-            this.mcpServer = new PubliiMCPServer(this);
-        }
-
-        return await this.mcpServer.start();
-    }
-
-    /**
-     * Stop MCP server
-     * Called via IPC event: app-mcp-stop
-     */
-    async stopMCPServer() {
-        console.log('[App] Stopping MCP server...');
-
-        if (!this.mcpServer) {
-            return { success: true, message: 'MCP server not initialized' };
-        }
-
-        return await this.mcpServer.stop();
-    }
-
-    /**
-     * Restart MCP server
-     * Called via IPC event: app-mcp-restart
-     */
-    async restartMCPServer() {
-        console.log('[App] Restarting MCP server...');
-
-        if (!this.mcpServer) {
-            this.mcpServer = new PubliiMCPServer(this);
-        }
-
-        return await this.mcpServer.restart();
-    }
-
-    /**
-     * Get MCP server status
-     * Called via IPC event: app-mcp-status
-     */
-    getMCPServerStatus() {
-        if (!this.mcpServer) {
-            return { running: false, version: null, tools: [] };
-        }
-
-        return this.mcpServer.getStatus();
-    }
 }
+
+// Extend App with MCP methods (isolated for upstream compatibility)
+extendAppWithMcp(App);
 
 module.exports = App;
