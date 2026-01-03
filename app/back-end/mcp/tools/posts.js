@@ -664,6 +664,20 @@ class PostTools {
         }
       }
 
+      // Validate block editor image paths
+      let imageValidation = null;
+      if (editorType === 'blockeditor' && result.postID) {
+        try {
+          const sitePath = path.join(appInstance.sitesDir, args.site);
+          imageValidation = BlockEditorHelper.validateImagePaths(postText, sitePath, result.postID);
+          if (!imageValidation.valid) {
+            console.error(`[MCP] Warning: ${imageValidation.missingImages.length} missing images in post ${result.postID}`);
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not validate image paths:', e.message);
+        }
+      }
+
       console.error(`[MCP] Created post: ${args.title} (ID: ${result.postID})`);
 
       // Notify frontend to refresh posts list
@@ -672,15 +686,31 @@ class PostTools {
         console.error('[MCP] Frontend notified of new post');
       }
 
+      // Build response with optional warnings
+      const response = {
+        success: true,
+        message: `Post "${args.title}" created successfully`,
+        postId: result.postID,
+        site: args.site
+      };
+
+      // Add image validation warnings if there are missing images
+      if (imageValidation && !imageValidation.valid) {
+        response.warnings = {
+          missingImages: imageValidation.missingImages.map(img => ({
+            filename: img.filename,
+            url: img.url,
+            type: img.type
+          })),
+          suggestions: imageValidation.suggestions
+        };
+        response.message += ` (WARNING: ${imageValidation.missingImages.length} image(s) not found - they may not display correctly)`;
+      }
+
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
-            success: true,
-            message: `Post "${args.title}" created successfully`,
-            postId: result.postID,
-            site: args.site
-          }, null, 2)
+          text: JSON.stringify(response, null, 2)
         }]
       };
     } catch (error) {
@@ -887,6 +917,20 @@ class PostTools {
         }
       }
 
+      // Validate block editor image paths if content was updated
+      let imageValidation = null;
+      if (args.text !== undefined && editorType === 'blockeditor') {
+        try {
+          const sitePath = path.join(appInstance.sitesDir, args.site);
+          imageValidation = BlockEditorHelper.validateImagePaths(postText, sitePath, args.id);
+          if (!imageValidation.valid) {
+            console.error(`[MCP] Warning: ${imageValidation.missingImages.length} missing images in post ${args.id}`);
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not validate image paths:', e.message);
+        }
+      }
+
       console.error(`[MCP] Updated post: ${postData.title} (ID: ${args.id})`);
 
       // Notify frontend
@@ -895,15 +939,31 @@ class PostTools {
         console.error('[MCP] Frontend notified of updated post');
       }
 
+      // Build response with optional warnings
+      const response = {
+        success: true,
+        message: `Post "${postData.title}" updated successfully`,
+        postId: args.id,
+        site: args.site
+      };
+
+      // Add image validation warnings if there are missing images
+      if (imageValidation && !imageValidation.valid) {
+        response.warnings = {
+          missingImages: imageValidation.missingImages.map(img => ({
+            filename: img.filename,
+            url: img.url,
+            type: img.type
+          })),
+          suggestions: imageValidation.suggestions
+        };
+        response.message += ` (WARNING: ${imageValidation.missingImages.length} image(s) not found - they may not display correctly)`;
+      }
+
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
-            success: true,
-            message: `Post "${postData.title}" updated successfully`,
-            postId: args.id,
-            site: args.site
-          }, null, 2)
+          text: JSON.stringify(response, null, 2)
         }]
       };
     } catch (error) {

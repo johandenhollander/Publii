@@ -568,6 +568,7 @@ class App {
         windowParams.webPreferences = {
             nodeIntegration: false,
             contextIsolation: true,
+            sandbox: false, // Required for preload script to use require() for MCP channels
             spellcheck: true,
             preload: path.join(__dirname, 'app-preload.js'),
             icon: path.join(__dirname, 'assets', 'icon.png')

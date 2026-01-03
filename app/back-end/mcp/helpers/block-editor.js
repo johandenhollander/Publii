@@ -476,6 +476,158 @@ class BlockEditorHelper {
   }
 
   /**
+   * Validate that all images referenced in block editor content exist
+   * Returns an array of missing images with details
+   *
+   * @param {string|Array} content - Block editor content (JSON string or array)
+   * @param {string} sitePath - Path to site directory
+   * @param {number} postId - Post ID (for determining media directory)
+   * @returns {Object} Validation result with missing images and suggestions
+   */
+  static validateImagePaths(content, sitePath, postId) {
+    const result = {
+      valid: true,
+      missingImages: [],
+      suggestions: []
+    };
+
+    // Parse content
+    let blocks;
+    try {
+      blocks = typeof content === 'string' ? JSON.parse(content) : content;
+    } catch (e) {
+      // Not valid JSON, skip validation
+      return result;
+    }
+
+    if (!Array.isArray(blocks)) {
+      return result;
+    }
+
+    // Determine media directory for this post
+    const postMediaDir = path.join(sitePath, 'input', 'media', 'posts', postId.toString());
+    const tempMediaDir = path.join(sitePath, 'input', 'media', 'posts', 'temp');
+
+    for (const block of blocks) {
+      // Check image blocks
+      if (block.type === 'publii-image' && block.content && block.content.image) {
+        const imageUrl = block.content.image;
+        const validation = this.validateSingleImage(imageUrl, sitePath, postId, postMediaDir, tempMediaDir);
+
+        if (!validation.exists) {
+          result.valid = false;
+          result.missingImages.push({
+            type: 'image',
+            url: imageUrl,
+            filename: validation.filename,
+            expectedPath: validation.expectedPath,
+            checkedPaths: validation.checkedPaths
+          });
+
+          // Check if image exists in another post's folder
+          if (validation.foundInOtherPost) {
+            result.suggestions.push({
+              image: validation.filename,
+              message: `Image found in post ${validation.foundInOtherPost}. Upload it to post ${postId} first with upload_image tool.`,
+              sourcePost: validation.foundInOtherPost,
+              targetPost: postId
+            });
+          }
+        }
+      }
+
+      // Check gallery blocks
+      if (block.type === 'publii-gallery' && block.content && block.content.images) {
+        for (const img of block.content.images) {
+          if (img.src) {
+            const validation = this.validateSingleImage(img.src, sitePath, postId, postMediaDir, tempMediaDir, true);
+
+            if (!validation.exists) {
+              result.valid = false;
+              result.missingImages.push({
+                type: 'gallery',
+                url: img.src,
+                filename: validation.filename,
+                expectedPath: validation.expectedPath
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Validate a single image URL
+   * @private
+   */
+  static validateSingleImage(imageUrl, sitePath, postId, postMediaDir, tempMediaDir, isGallery = false) {
+    const filename = this.extractFilename(imageUrl);
+    if (!filename) {
+      return { exists: true, filename: null }; // Can't validate, assume OK
+    }
+
+    const checkedPaths = [];
+    let exists = false;
+    let foundInOtherPost = null;
+
+    // Build list of paths to check
+    const pathsToCheck = [];
+
+    if (isGallery) {
+      pathsToCheck.push(path.join(postMediaDir, 'gallery', filename));
+      pathsToCheck.push(path.join(tempMediaDir, 'gallery', filename));
+    } else {
+      pathsToCheck.push(path.join(postMediaDir, filename));
+      pathsToCheck.push(path.join(tempMediaDir, filename));
+    }
+
+    // Check each path
+    for (const checkPath of pathsToCheck) {
+      checkedPaths.push(checkPath);
+      if (fs.existsSync(checkPath)) {
+        exists = true;
+        break;
+      }
+    }
+
+    // If not found, check if it exists in another post's folder
+    if (!exists) {
+      const postsMediaDir = path.join(sitePath, 'input', 'media', 'posts');
+      if (fs.existsSync(postsMediaDir)) {
+        try {
+          const postDirs = fs.readdirSync(postsMediaDir, { withFileTypes: true })
+            .filter(d => d.isDirectory() && d.name !== 'temp' && d.name !== 'mcp-backup' && d.name !== postId.toString())
+            .map(d => d.name);
+
+          for (const otherPostId of postDirs) {
+            const otherPath = isGallery
+              ? path.join(postsMediaDir, otherPostId, 'gallery', filename)
+              : path.join(postsMediaDir, otherPostId, filename);
+
+            if (fs.existsSync(otherPath)) {
+              foundInOtherPost = otherPostId;
+              break;
+            }
+          }
+        } catch (e) {
+          // Ignore errors scanning directories
+        }
+      }
+    }
+
+    return {
+      exists,
+      filename,
+      expectedPath: pathsToCheck[0],
+      checkedPaths,
+      foundInOtherPost
+    };
+  }
+
+  /**
    * Parse block editor content and register images from it
    * Call this after post is saved to register content images
    *

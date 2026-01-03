@@ -651,6 +651,20 @@ class PageTools {
         }
       }
 
+      // Validate block editor image paths
+      let imageValidation = null;
+      if (editorType === 'blockeditor' && result.pageID) {
+        try {
+          const sitePath = path.join(appInstance.sitesDir, args.site);
+          imageValidation = BlockEditorHelper.validateImagePaths(pageText, sitePath, result.pageID);
+          if (!imageValidation.valid) {
+            console.error(`[MCP] Warning: ${imageValidation.missingImages.length} missing images in page ${result.pageID}`);
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not validate image paths:', e.message);
+        }
+      }
+
       console.error(`[MCP] Created page: ${args.title} (ID: ${result.pageID})`);
 
       // Notify frontend
@@ -659,15 +673,31 @@ class PageTools {
         console.error('[MCP] Frontend notified of new page');
       }
 
+      // Build response with optional warnings
+      const response = {
+        success: true,
+        message: `Page "${args.title}" created successfully`,
+        pageId: result.pageID,
+        site: args.site
+      };
+
+      // Add image validation warnings if there are missing images
+      if (imageValidation && !imageValidation.valid) {
+        response.warnings = {
+          missingImages: imageValidation.missingImages.map(img => ({
+            filename: img.filename,
+            url: img.url,
+            type: img.type
+          })),
+          suggestions: imageValidation.suggestions
+        };
+        response.message += ` (WARNING: ${imageValidation.missingImages.length} image(s) not found - they may not display correctly)`;
+      }
+
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
-            success: true,
-            message: `Page "${args.title}" created successfully`,
-            pageId: result.pageID,
-            site: args.site
-          }, null, 2)
+          text: JSON.stringify(response, null, 2)
         }]
       };
     } catch (error) {
@@ -880,6 +910,20 @@ class PageTools {
         }
       }
 
+      // Validate block editor image paths if content was updated
+      let imageValidation = null;
+      if (args.text !== undefined && editorType === 'blockeditor') {
+        try {
+          const sitePath = path.join(appInstance.sitesDir, args.site);
+          imageValidation = BlockEditorHelper.validateImagePaths(pageText, sitePath, args.id);
+          if (!imageValidation.valid) {
+            console.error(`[MCP] Warning: ${imageValidation.missingImages.length} missing images in page ${args.id}`);
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not validate image paths:', e.message);
+        }
+      }
+
       console.error(`[MCP] Updated page: ${pageData.title} (ID: ${args.id})`);
 
       // Notify frontend
@@ -888,15 +932,31 @@ class PageTools {
         console.error('[MCP] Frontend notified of updated page');
       }
 
+      // Build response with optional warnings
+      const response = {
+        success: true,
+        message: `Page "${pageData.title}" updated successfully`,
+        pageId: args.id,
+        site: args.site
+      };
+
+      // Add image validation warnings if there are missing images
+      if (imageValidation && !imageValidation.valid) {
+        response.warnings = {
+          missingImages: imageValidation.missingImages.map(img => ({
+            filename: img.filename,
+            url: img.url,
+            type: img.type
+          })),
+          suggestions: imageValidation.suggestions
+        };
+        response.message += ` (WARNING: ${imageValidation.missingImages.length} image(s) not found - they may not display correctly)`;
+      }
+
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({
-            success: true,
-            message: `Page "${pageData.title}" updated successfully`,
-            pageId: args.id,
-            site: args.site
-          }, null, 2)
+          text: JSON.stringify(response, null, 2)
         }]
       };
     } catch (error) {
