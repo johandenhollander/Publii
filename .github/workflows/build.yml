@@ -69,8 +69,18 @@ jobs:
       - name: Build production assets
         run: npm run prod
 
-      - name: Prepare editor
-        run: npm run prepare-editor:win
+      - name: Prepare editor CSS
+        run: |
+          npx sass app/src/scss/editor/editor.scss app/dist/css/editor.css
+          npx sass app/src/scss/editor/editor-options.scss app/dist/css/editor-options.css
+
+      - name: Prepare vendor files
+        run: |
+          if (Test-Path app/dist/vendor) { Remove-Item -Recurse -Force app/dist/vendor }
+          New-Item -ItemType Directory -Force -Path app/dist/vendor
+          Copy-Item -Recurse app/src/helpers/vendor/tinymce app/dist/vendor/tinymce
+          Copy-Item -Recurse app/src/helpers/vendor/jquery app/dist/vendor/jquery
+        shell: pwsh
 
       - name: Build Windows installer
         run: npx electron-builder build --win nsis --publish never
