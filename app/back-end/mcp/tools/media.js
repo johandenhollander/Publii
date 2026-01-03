@@ -45,7 +45,7 @@ class MediaTools {
       },
       {
         name: 'upload_image',
-        description: 'Upload an image using Publii\'s native image handling (with responsive images and thumbnails). Returns a file:/// URL for use in post content. For block editor: use the returned "url" field in your image block content, along with imageWidth and imageHeight. Available imageAlign options: "center" (default), "wide", "full". Example workflow: 1) upload_image with postId=0, 2) Create post with block: {"type":"publii-image","content":{"image":"<url from response>","imageWidth":800,"imageHeight":600,"alt":"","caption":""},"config":{"imageAlign":"center"}}',
+        description: 'Upload an image using Publii\'s native image handling (with responsive images and thumbnails). Returns a relative URL (e.g., "/media/posts/88/image.jpg") ready for use in HTML content. For new posts (postId=0), images go to temp and URL will be "/media/posts/temp/image.jpg" - these are moved automatically when the post is saved. Example: <img src="/media/posts/88/photo.jpg">',
         inputSchema: {
           type: 'object',
           properties: {
@@ -283,6 +283,12 @@ class MediaTools {
 
       console.error(`[MCP] Uploaded image with responsive versions: ${result.featuredImageFilename} (${width}x${height})`);
 
+      // Generate the relative URL that should be used in HTML content
+      // For postId=0, images go to temp (will be moved on post save)
+      // For existing posts, images are in /media/posts/{id}/
+      const targetDir = itemId === 0 ? 'temp' : itemId.toString();
+      const relativeUrl = `/media/posts/${targetDir}/${result.featuredImageFilename}`;
+
       // Notify frontend if running in Publii
       if (appInstance.mainWindow && appInstance.mainWindow.webContents) {
         appInstance.mainWindow.webContents.send('app-image-uploaded', {
@@ -297,7 +303,8 @@ class MediaTools {
           text: JSON.stringify({
             success: true,
             message: `Image uploaded with responsive versions`,
-            url: result.featuredImage,
+            url: relativeUrl,
+            fileUrl: result.featuredImage,
             filename: result.featuredImageFilename,
             imageWidth: width,
             imageHeight: height,

@@ -13,6 +13,7 @@
                 onChangeEventName="pages-filter-value-changed" />
 
             <p-button
+                v-if="$store.state.app.config.experimentalMcpIntegration"
                 :onClick="refreshPages"
                 slot="buttons"
                 type="outline icon"

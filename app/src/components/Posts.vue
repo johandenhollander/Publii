@@ -10,6 +10,7 @@
                 onChangeEventName="posts-filter-value-changed" />
 
             <p-button
+                v-if="$store.state.app.config.experimentalMcpIntegration"
                 :onClick="refreshPosts"
                 slot="buttons"
                 type="outline icon"

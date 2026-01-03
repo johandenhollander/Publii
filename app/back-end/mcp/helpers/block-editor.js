@@ -53,33 +53,34 @@ class BlockEditorHelper {
 
     // Transform each block
     const transformedBlocks = blocks.map(block => {
-      // Ensure block has an id (at the start of the object)
+      // Ensure block has an id
       const blockId = block.id || crypto.randomUUID();
 
       // Handle image blocks
       if (block.type === 'publii-image') {
         block = this.transformImageBlock(block, mediaDir, isNewPost, contentImages);
-        block.id = blockId;
-        return block;
+        // Rebuild object with id FIRST (Publii block editor requires this order)
+        const { id: _, ...blockWithoutId } = block;
+        return { id: blockId, ...blockWithoutId };
       }
 
       // Handle gallery blocks
       if (block.type === 'publii-gallery') {
         block = this.transformGalleryBlock(block, mediaDir, isNewPost, contentImages);
-        block.id = blockId;
-        return block;
+        const { id: _, ...blockWithoutId } = block;
+        return { id: blockId, ...blockWithoutId };
       }
 
       // Handle quote blocks - content must be an object with numbered keys + text + author
       if (block.type === 'publii-quote') {
         block = this.transformQuoteBlock(block);
-        block.id = blockId;
-        return block;
+        const { id: _, ...blockWithoutId } = block;
+        return { id: blockId, ...blockWithoutId };
       }
 
-      // For other blocks, just ensure id is set
-      block.id = blockId;
-      return block;
+      // For other blocks, rebuild with id first
+      const { id: _, ...rest } = block;
+      return { id: blockId, ...rest };
     });
 
     // Register content images in database if db is provided
@@ -98,34 +99,59 @@ class BlockEditorHelper {
       return block;
     }
 
-    const imageFilename = this.extractFilename(block.content.image);
-    if (!imageFilename) {
+    const originalImageUrl = block.content.image;
+    const extractedPath = this.extractFilename(originalImageUrl);
+    if (!extractedPath) {
       return block;
     }
+    // Get just the filename (for file lookup and URL building)
+    const imageFilename = path.basename(extractedPath);
 
-    // Get image dimensions
-    const imagePath = path.join(mediaDir, imageFilename);
-    let width = 0;
-    let height = 0;
+    // Check if image is already in correct #DOMAIN_NAME# format with dimensions
+    // If so, skip URL transformation to avoid double-processing
+    const alreadyProcessed = originalImageUrl.startsWith('#DOMAIN_NAME#') &&
+                              !originalImageUrl.startsWith('#DOMAIN_NAME##') &&
+                              block.content.imageWidth > 0 &&
+                              block.content.imageHeight > 0;
 
-    if (fs.existsSync(imagePath)) {
-      try {
-        const dimensions = sizeOf(imagePath);
-        width = dimensions.width || 0;
-        height = dimensions.height || 0;
-      } catch (e) {
-        console.error(`[MCP] Could not get dimensions for ${imageFilename}:`, e.message);
+    // Get image dimensions from file if not already set
+    let width = block.content.imageWidth || 0;
+    let height = block.content.imageHeight || 0;
+
+    if (width === 0 || height === 0) {
+      // Try multiple locations for the image
+      const possiblePaths = [
+        path.join(mediaDir, imageFilename),
+        // For #DOMAIN_NAME# URLs, also try the parent posts directory with post ID subdirs
+        path.join(path.dirname(mediaDir), imageFilename)
+      ];
+
+      for (const imagePath of possiblePaths) {
+        if (fs.existsSync(imagePath)) {
+          try {
+            const dimensions = sizeOf(imagePath);
+            width = dimensions.width || 0;
+            height = dimensions.height || 0;
+            break;
+          } catch (e) {
+            console.error(`[MCP] Could not get dimensions for ${imageFilename}:`, e.message);
+          }
+        }
       }
     }
 
-    // Build the proper image URL
+    // Build the proper image URL (only if not already processed)
     let imageUrl;
-    if (isNewPost) {
+    if (alreadyProcessed) {
+      // Already in correct format, keep as-is
+      imageUrl = originalImageUrl;
+    } else if (isNewPost) {
       // For new posts, use file:/// URL to temp directory
       // Post.save() will transform this to #DOMAIN_NAME#
       imageUrl = 'file:///' + normalizePath(path.join(mediaDir, imageFilename));
     } else {
-      // For existing posts, use #DOMAIN_NAME# directly
+      // For existing posts, use #DOMAIN_NAME# directly with filename
+      // Publii's renderer adds the media/posts/{id}/ path automatically for block editor images
       imageUrl = '#DOMAIN_NAME#' + imageFilename;
     }
 
@@ -136,26 +162,76 @@ class BlockEditorHelper {
       caption: block.content.caption || ''
     });
 
-    // Update block content
+    // Extract link info from content if provided (MCP input format)
+    // Link can be a string (just URL) or an object with url, title, noFollow, targetBlank, etc.
+    let inputLink = null;
+    if (block.content.link) {
+      if (typeof block.content.link === 'string') {
+        // Simple string format - just the URL
+        inputLink = { url: block.content.link };
+      } else if (typeof block.content.link === 'object') {
+        // Full object format with all properties
+        inputLink = block.content.link;
+      }
+    }
+
+    // Update block content - match Publii property order
     block.content = {
       image: imageUrl,
-      imageWidth: width,
       imageHeight: height,
+      imageWidth: width,
       alt: block.content.alt || '',
       caption: block.content.caption || ''
     };
 
-    // Ensure proper config structure
+    // Ensure proper config structure, preserving any existing values
     block.config = block.config || {};
     block.config.imageAlign = block.config.imageAlign || 'center';
-    block.config.link = block.config.link || {
+
+    // Handle link config - full structure required by Publii
+    // URL formats:
+    //   External: https://example.com
+    //   Post: #INTERNAL_LINK#/post/{postId}
+    //   Page: #INTERNAL_LINK#/page/{pageId}
+    //   Tag: #INTERNAL_LINK#/tag/{tagId}
+    //   Author: #INTERNAL_LINK#/author/{authorId}
+    //   File: #INTERNAL_LINK#/file/{filePath}
+    const defaultLink = {
       url: '',
+      title: '',
+      cssClass: '',
       noFollow: false,
       targetBlank: false,
       sponsored: false,
-      ugc: false
+      ugc: false,
+      download: false
     };
-    block.config.advanced = block.config.advanced || { cssClasses: '', id: '' };
+
+    // If link was provided in content (MCP input format), use it
+    if (inputLink && inputLink.url) {
+      block.config.link = {
+        url: inputLink.url,
+        title: inputLink.title || block.config.link?.title || '',
+        cssClass: inputLink.cssClass || block.config.link?.cssClass || '',
+        noFollow: inputLink.noFollow || block.config.link?.noFollow || false,
+        targetBlank: inputLink.targetBlank || block.config.link?.targetBlank || false,
+        sponsored: inputLink.sponsored || block.config.link?.sponsored || false,
+        ugc: inputLink.ugc || block.config.link?.ugc || false,
+        download: inputLink.download || block.config.link?.download || false
+      };
+    } else {
+      // Preserve existing link config, ensuring all fields exist
+      block.config.link = {
+        ...defaultLink,
+        ...block.config.link
+      };
+    }
+
+    // Only keep cssClasses and id in advanced config (other fields like 'style' cause UI errors)
+    block.config.advanced = {
+      cssClasses: block.config.advanced?.cssClasses || '',
+      id: block.config.advanced?.id || ''
+    };
 
     return block;
   }
@@ -259,7 +335,11 @@ class BlockEditorHelper {
     block.config = block.config || {};
     block.config.imageAlign = block.config.imageAlign || 'center';
     block.config.columns = block.config.columns || 3;
-    block.config.advanced = block.config.advanced || { cssClasses: '', id: '' };
+    // Only keep cssClasses and id in advanced config (other fields like 'style' cause UI errors)
+    block.config.advanced = {
+      cssClasses: block.config.advanced?.cssClasses || '',
+      id: block.config.advanced?.id || ''
+    };
 
     return block;
   }

@@ -508,6 +508,16 @@ async function main() {
   log.info(`Client: ${clientName}`);
   log.info(`Debug level: ${Object.keys(DEBUG_LEVELS).find(k => DEBUG_LEVELS[k] === DEBUG_LEVEL) || 'INFO'}`);
   log.info(`Publii data: ${dataDir}`);
+
+  // Check if MCP is enabled in Publii settings
+  if (!appInstance.appConfig?.experimentalMcpIntegration) {
+    log.error('MCP integration is disabled in Publii settings.');
+    log.error('To enable: Open Publii → Settings → Experimental features → Enable MCP integration');
+    console.error('ERROR: MCP integration is disabled in Publii settings.');
+    console.error('To enable: Open Publii → Settings → Experimental features → Enable MCP integration');
+    process.exit(1);
+  }
+
   log.info(`Sites found: ${Object.keys(appInstance.sites).join(', ') || 'none'}`);
 
   // Write initial status

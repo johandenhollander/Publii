@@ -14,6 +14,114 @@ const normalizePath = require('normalize-path');
 const { saveFeaturedImage } = require('../helpers/featured-image.js');
 const BlockEditorHelper = require('../helpers/block-editor.js');
 
+/**
+ * Strip CDATA wrapper from text content.
+ * AI assistants sometimes wrap content in CDATA tags which should not be stored literally.
+ * @param {string} text - The text content
+ * @returns {string} - The text without CDATA wrapper
+ */
+function stripCDATA(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text
+    .replace(/^<!\[CDATA\[/, '')
+    .replace(/\]\]>$/, '')
+    .trim();
+}
+
+/**
+ * Convert any file:/// URLs in content to relative paths.
+ * Handles URLs pointing to any location within the site's media directory.
+ * @param {string} text - The HTML content
+ * @param {string} sitePath - Path to the site directory
+ * @param {number} pageId - The page ID (for logging)
+ * @returns {string} - The text with converted URLs
+ */
+function convertAllFileUrls(text, sitePath, pageId) {
+  if (!text || typeof text !== 'string') return text;
+
+  const mediaDir = path.join(sitePath, 'input', 'media');
+  const mediaDirNormalized = normalizePath(mediaDir);
+  const mediaDirWithoutSlash = mediaDirNormalized.replace(/^\//, '');
+  const escapedMediaDir = mediaDirWithoutSlash.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Match file:// followed by any number of slashes, then the media path
+  const fileUrlPattern = new RegExp(`file:/{2,}/?${escapedMediaDir}/([^"'\\s]+)`, 'gi');
+
+  const matches = [...text.matchAll(fileUrlPattern)];
+  if (matches.length > 0) {
+    console.error(`[MCP] Found ${matches.length} file:/// URLs to convert for page ${pageId}`);
+  }
+
+  // Convert: file:///path/to/site/input/media/posts/88/image.jpg -> /media/posts/88/image.jpg
+  return text.replace(fileUrlPattern, '/media/$1');
+}
+
+/**
+ * Convert file:/// URLs to relative paths and copy images from temp to page directory.
+ * This handles the case where Page.save() doesn't do the conversion (e.g., when temp dir was already processed).
+ * @param {string} text - The HTML content
+ * @param {string} sitePath - Path to the site directory
+ * @param {number} pageId - The page ID (used for the target directory)
+ * @returns {string} - The text with converted URLs
+ */
+function convertTempImageUrls(text, sitePath, pageId) {
+  if (!text || typeof text !== 'string') return text;
+
+  const tempDir = path.join(sitePath, 'input', 'media', 'posts', 'temp');
+  const pageDir = path.join(sitePath, 'input', 'media', 'posts', pageId.toString());
+  const tempDirNormalized = normalizePath(tempDir);
+
+  // First, normalize all file:// URLs to a consistent format
+  // file://// -> file:/// and handle both /home and home after slashes
+  let convertedText = text;
+
+  // Extract filenames from file:/// URLs pointing to temp directory
+  // Handle both: file:///home/... and file:////home/... (extra slashes)
+  const tempDirWithoutSlash = tempDirNormalized.replace(/^\//, '');
+  const escapedTempDir = tempDirWithoutSlash.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Match file:// followed by any number of slashes, optional leading slash, then the temp path
+  const fileUrlPattern = new RegExp(`file:/{2,}/?${escapedTempDir}/([^"'\\s]+)`, 'gi');
+
+  const matches = [...text.matchAll(fileUrlPattern)];
+  const filesToCopy = new Set();
+
+  for (const match of matches) {
+    filesToCopy.add(match[1]); // filename including responsive/ subdirectory
+    console.error(`[MCP] Found temp image: ${match[1]}`);
+  }
+
+  // Copy files from temp to page directory if they exist
+  if (filesToCopy.size > 0) {
+    try {
+      fs.ensureDirSync(pageDir);
+
+      for (const filename of filesToCopy) {
+        const srcFile = path.join(tempDir, filename);
+        const destFile = path.join(pageDir, filename);
+
+        if (fs.existsSync(srcFile)) {
+          fs.ensureDirSync(path.dirname(destFile));
+          fs.copySync(srcFile, destFile);
+          console.error(`[MCP] Copied image: ${filename} to page ${pageId}`);
+        } else {
+          console.error(`[MCP] Warning: Source file not found: ${srcFile}`);
+        }
+      }
+    } catch (e) {
+      console.error(`[MCP] Warning: Could not copy images: ${e.message}`);
+    }
+  }
+
+  // Convert URLs: file:///path/to/temp/image.jpg -> #DOMAIN_NAME#image.jpg
+  // Use #DOMAIN_NAME# placeholder so Publii editor can display images
+  convertedText = convertedText.replace(fileUrlPattern, `#DOMAIN_NAME#$1`);
+
+  console.error(`[MCP] URL conversion complete for page ${pageId}, found ${filesToCopy.size} images`);
+
+  return convertedText;
+}
+
 class PageTools {
   /**
    * Get tool definitions for MCP protocol
@@ -73,7 +181,7 @@ class PageTools {
             },
             text: {
               type: 'string',
-              description: 'Page content (HTML, blocks JSON, or markdown)'
+              description: 'Page content (HTML, blocks JSON, or markdown). To include images: upload with upload_image first, then use the returned relative URL: <img src="/media/posts/88/image.jpg">'
             },
             slug: {
               type: 'string',
@@ -384,7 +492,8 @@ class PageTools {
       }
 
       // Transform block editor content if needed
-      let pageText = args.text;
+      // Strip CDATA wrapper if present (AI assistants sometimes add this)
+      let pageText = stripCDATA(args.text);
       const editorType = args.editor || 'tinymce';
 
       if (editorType === 'blockeditor') {
@@ -397,6 +506,26 @@ class PageTools {
         console.error('[MCP] Transformed block editor content for new page');
       }
 
+      // Pages need ',is-page' suffix in status
+      const fullStatus = baseStatus + ',is-page';
+
+      // BEFORE calling page.save(), backup temp images so they survive multiple page creations
+      // Page.save() deletes temp after processing the first page
+      const sitePath = path.join(appInstance.sitesDir, args.site);
+      const tempDir = path.join(sitePath, 'input', 'media', 'posts', 'temp');
+      const backupDir = path.join(sitePath, 'input', 'media', 'posts', 'mcp-backup');
+
+      // Backup temp files if they exist
+      if (fs.existsSync(tempDir)) {
+        try {
+          fs.ensureDirSync(backupDir);
+          fs.copySync(tempDir, backupDir, { overwrite: true });
+          console.error('[MCP] Backed up temp images to mcp-backup');
+        } catch (e) {
+          console.error('[MCP] Warning: Could not backup temp images:', e.message);
+        }
+      }
+
       const pageData = {
         site: args.site,
         id: 0, // 0 = new page
@@ -404,7 +533,7 @@ class PageTools {
         slug: pageSlug,
         text: pageText,
         author: args.author || 1,
-        status: baseStatus,
+        status: fullStatus,
         creationDate: now,
         modificationDate: now,
         template: args.template || '',
@@ -424,14 +553,82 @@ class PageTools {
       const page = new Page(appInstance, pageData);
       const result = page.save();
 
+      // Convert temp URLs to page-specific URLs
+      // This handles both file:/// URLs and /media/posts/temp/ relative URLs
+      if (result.pageID) {
+        try {
+          const savedPage = appInstance.db.prepare('SELECT text FROM posts WHERE id = @id').get({ id: result.pageID });
+
+          if (savedPage && savedPage.text) {
+            let convertedText = savedPage.text;
+            let needsUpdate = false;
+
+            // Handle file:/// URLs (legacy format)
+            if (convertedText.includes('file:///')) {
+              // Restore temp from backup so convertTempImageUrls can find the files
+              if (fs.existsSync(backupDir) && !fs.existsSync(tempDir)) {
+                fs.copySync(backupDir, tempDir);
+                console.error('[MCP] Restored temp from mcp-backup');
+              }
+              convertedText = convertTempImageUrls(convertedText, sitePath, result.pageID);
+              needsUpdate = true;
+              console.error('[MCP] Converted file:/// URLs to relative paths for page', result.pageID);
+            }
+
+            // Handle /media/posts/temp/ relative URLs (new format from upload_image)
+            if (convertedText.includes('/media/posts/temp/')) {
+              // First, copy files from temp to page directory
+              const pageDir = path.join(sitePath, 'input', 'media', 'posts', result.pageID.toString());
+              const tempDirForCopy = path.join(sitePath, 'input', 'media', 'posts', 'temp');
+
+              // Also check mcp-backup if temp was already processed
+              const backupDirForCopy = path.join(sitePath, 'input', 'media', 'posts', 'mcp-backup');
+              const sourceDir = fs.existsSync(tempDirForCopy) ? tempDirForCopy :
+                               (fs.existsSync(backupDirForCopy) ? backupDirForCopy : null);
+
+              if (sourceDir) {
+                // Extract filenames from content
+                const imgRegex = /\/media\/posts\/temp\/([^"'\s]+)/g;
+                const imgMatches = [...convertedText.matchAll(imgRegex)];
+                const filesToCopy = new Set(imgMatches.map(m => m[1]));
+
+                if (filesToCopy.size > 0) {
+                  fs.ensureDirSync(pageDir);
+                  for (const filename of filesToCopy) {
+                    const srcFile = path.join(sourceDir, filename);
+                    const destFile = path.join(pageDir, filename);
+                    if (fs.existsSync(srcFile)) {
+                      fs.ensureDirSync(path.dirname(destFile));
+                      fs.copySync(srcFile, destFile);
+                      console.error(`[MCP] Copied content image: ${filename} to page ${result.pageID}`);
+                    }
+                  }
+                }
+              }
+
+              // Then update URLs in content - use #DOMAIN_NAME# placeholder so Publii editor can display images
+              convertedText = convertedText.replace(/\/media\/posts\/temp\//g, `#DOMAIN_NAME#`);
+              needsUpdate = true;
+              console.error('[MCP] Converted /media/posts/temp/ URLs to #DOMAIN_NAME# for page', result.pageID);
+            }
+
+            if (needsUpdate) {
+              appInstance.db.prepare('UPDATE posts SET text = @text WHERE id = @id').run({ text: convertedText, id: result.pageID });
+            }
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not convert image URLs:', e.message);
+        }
+      }
+
       // Fix block editor image URLs: Page.save() produces #DOMAIN_NAME#/filename
       // but it should be #DOMAIN_NAME#filename (without the slash)
       if (editorType === 'blockeditor' && result.pageID) {
         try {
-          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = ?').get(result.pageID);
+          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = @id').get({ id: result.pageID });
           if (fixedText && fixedText.text && fixedText.text.includes('#DOMAIN_NAME#/')) {
             const correctedText = fixedText.text.replace(/#DOMAIN_NAME#\//g, '#DOMAIN_NAME#');
-            appInstance.db.prepare('UPDATE posts SET text = ? WHERE id = ?').run(correctedText, result.pageID);
+            appInstance.db.prepare('UPDATE posts SET text = @text WHERE id = @id').run({ text: correctedText, id: result.pageID });
             console.error('[MCP] Fixed block editor image URLs for page', result.pageID);
           }
         } catch (e) {
@@ -561,7 +758,8 @@ class PageTools {
       const editorType = args.editor !== undefined ? args.editor : (existingData.additionalData?.editor || 'tinymce');
 
       // Transform block editor content if text is being updated
-      let pageText = args.text !== undefined ? args.text : existing.text;
+      // Strip CDATA wrapper if present (AI assistants sometimes add this)
+      let pageText = args.text !== undefined ? stripCDATA(args.text) : existing.text;
       if (args.text !== undefined && editorType === 'blockeditor') {
         const sitePath = path.join(appInstance.sitesDir, args.site);
         pageText = BlockEditorHelper.transformContent(args.text, {
@@ -574,6 +772,16 @@ class PageTools {
 
       // Merge existing data with updates
       // Note: DB columns are: id, title, authors, slug, text, featured_image_id, created_at, modified_at, status, template
+      // Pages need ',is-page' suffix in status
+      let newStatus;
+      if (args.status !== undefined) {
+        // User provided status - ensure it has ,is-page
+        newStatus = args.status.includes(',is-page') ? args.status : args.status + ',is-page';
+      } else {
+        // Keep existing status (which should already have ,is-page)
+        newStatus = existing.status;
+      }
+
       const pageData = {
         site: args.site,
         id: args.id,
@@ -581,7 +789,7 @@ class PageTools {
         slug: args.slug !== undefined ? args.slug : existing.slug,
         text: pageText,
         author: existing.authors,  // DB column is 'authors'
-        status: args.status !== undefined ? args.status : existing.status.replace(',is-page', ''),
+        status: newStatus,
         creationDate: existing.created_at,  // DB column is 'created_at'
         modificationDate: now,
         template: args.template !== undefined ? args.template : (existing.template || ''),
@@ -598,14 +806,73 @@ class PageTools {
       const updatedPage = new Page(appInstance, pageData);
       const result = updatedPage.save();
 
+      // Convert temp URLs to page-specific URLs
+      if (args.text !== undefined) {
+        try {
+          const savedPage = appInstance.db.prepare('SELECT text FROM posts WHERE id = @id').get({ id: args.id });
+          if (savedPage && savedPage.text) {
+            let convertedText = savedPage.text;
+            let needsUpdate = false;
+
+            // Handle file:/// URLs
+            if (convertedText.includes('file:///')) {
+              const sitePath = path.join(appInstance.sitesDir, args.site);
+              convertedText = convertAllFileUrls(convertedText, sitePath, args.id);
+              needsUpdate = true;
+              console.error('[MCP] Converted file:/// URLs to relative paths for page', args.id);
+            }
+
+            // Handle /media/posts/temp/ relative URLs
+            if (convertedText.includes('/media/posts/temp/')) {
+              // First, copy files from temp to page directory
+              const pageDir = path.join(sitePath, 'input', 'media', 'posts', args.id.toString());
+              const tempDirForCopy = path.join(sitePath, 'input', 'media', 'posts', 'temp');
+              const backupDirForCopy = path.join(sitePath, 'input', 'media', 'posts', 'mcp-backup');
+              const sourceDir = fs.existsSync(tempDirForCopy) ? tempDirForCopy :
+                               (fs.existsSync(backupDirForCopy) ? backupDirForCopy : null);
+
+              if (sourceDir) {
+                const imgRegex = /\/media\/posts\/temp\/([^"'\s]+)/g;
+                const imgMatches = [...convertedText.matchAll(imgRegex)];
+                const filesToCopy = new Set(imgMatches.map(m => m[1]));
+
+                if (filesToCopy.size > 0) {
+                  fs.ensureDirSync(pageDir);
+                  for (const filename of filesToCopy) {
+                    const srcFile = path.join(sourceDir, filename);
+                    const destFile = path.join(pageDir, filename);
+                    if (fs.existsSync(srcFile)) {
+                      fs.ensureDirSync(path.dirname(destFile));
+                      fs.copySync(srcFile, destFile);
+                      console.error(`[MCP] Copied content image: ${filename} to page ${args.id}`);
+                    }
+                  }
+                }
+              }
+
+              // Use #DOMAIN_NAME# placeholder so Publii editor can display images
+              convertedText = convertedText.replace(/\/media\/posts\/temp\//g, `#DOMAIN_NAME#`);
+              needsUpdate = true;
+              console.error('[MCP] Converted /media/posts/temp/ URLs to #DOMAIN_NAME# for page', args.id);
+            }
+
+            if (needsUpdate) {
+              appInstance.db.prepare('UPDATE posts SET text = @text WHERE id = @id').run({ text: convertedText, id: args.id });
+            }
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not convert URLs:', e.message);
+        }
+      }
+
       // Fix block editor image URLs: Page.save() produces #DOMAIN_NAME#/filename
       // but it should be #DOMAIN_NAME#filename (without the slash)
       if (editorType === 'blockeditor') {
         try {
-          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = ?').get(args.id);
+          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = @id').get({ id: args.id });
           if (fixedText && fixedText.text && fixedText.text.includes('#DOMAIN_NAME#/')) {
             const correctedText = fixedText.text.replace(/#DOMAIN_NAME#\//g, '#DOMAIN_NAME#');
-            appInstance.db.prepare('UPDATE posts SET text = ? WHERE id = ?').run(correctedText, args.id);
+            appInstance.db.prepare('UPDATE posts SET text = @text WHERE id = @id').run({ text: correctedText, id: args.id });
             console.error('[MCP] Fixed block editor image URLs for page', args.id);
           }
         } catch (e) {

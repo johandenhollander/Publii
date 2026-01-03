@@ -9,6 +9,7 @@
             v-if="!showEmptyState"
             :title="$t('menu.menu')">
             <p-button
+                v-if="$store.state.app.config.experimentalMcpIntegration"
                 :onClick="refreshMenus"
                 slot="buttons"
                 type="outline icon"

@@ -1,7 +1,7 @@
 {
   "productName": "Publii",
   "name": "Publii",
-  "version": "0.47.4-mcp.2",
+  "version": "0.47.4-mcp.10",
   "description": "Static Site CMS",
   "main": "main.js",
   "scripts": {
@@ -29,7 +29,7 @@
     "@gitbeaker/node": "35.8.1",
     "@google-cloud/storage": "6.11.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "@octokit/rest": "22.0.0",
+    "@octokit/rest": "^20.1.1",
     "adm-zip": "0.5.10",
     "archiver": "5.3.1",
     "basic-ftp": "5.0.5",

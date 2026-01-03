@@ -15,6 +15,115 @@ const normalizePath = require('normalize-path');
 const { saveFeaturedImage } = require('../helpers/featured-image.js');
 const BlockEditorHelper = require('../helpers/block-editor.js');
 
+/**
+ * Strip CDATA wrapper from text content.
+ * AI assistants sometimes wrap content in CDATA tags which should not be stored literally.
+ * @param {string} text - The text content
+ * @returns {string} - The text without CDATA wrapper
+ */
+function stripCDATA(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text
+    .replace(/^<!\[CDATA\[/, '')
+    .replace(/\]\]>$/, '')
+    .trim();
+}
+
+/**
+ * Convert any file:/// URLs in content to relative paths.
+ * Handles URLs pointing to any location within the site's media directory.
+ * @param {string} text - The HTML content
+ * @param {string} sitePath - Path to the site directory
+ * @param {number} postId - The post ID (for logging)
+ * @returns {string} - The text with converted URLs
+ */
+function convertAllFileUrls(text, sitePath, postId) {
+  if (!text || typeof text !== 'string') return text;
+
+  const mediaDir = path.join(sitePath, 'input', 'media');
+  const mediaDirNormalized = normalizePath(mediaDir);
+  const mediaDirWithoutSlash = mediaDirNormalized.replace(/^\//, '');
+  const escapedMediaDir = mediaDirWithoutSlash.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Match file:// followed by any number of slashes, then the media path
+  // Capture everything after /media/ to preserve the full relative path
+  const fileUrlPattern = new RegExp(`file:/{2,}/?${escapedMediaDir}/([^"'\\s]+)`, 'gi');
+
+  const matches = [...text.matchAll(fileUrlPattern)];
+  if (matches.length > 0) {
+    console.error(`[MCP] Found ${matches.length} file:/// URLs to convert for post ${postId}`);
+  }
+
+  // Convert: file:///path/to/site/input/media/posts/88/image.jpg -> /media/posts/88/image.jpg
+  return text.replace(fileUrlPattern, '/media/$1');
+}
+
+/**
+ * Convert file:/// URLs to relative paths and copy images from temp to post directory.
+ * This handles the case where Post.save() doesn't do the conversion (e.g., when temp dir was already processed).
+ * @param {string} text - The HTML content
+ * @param {string} sitePath - Path to the site directory
+ * @param {number} postId - The post ID (used for the target directory)
+ * @returns {string} - The text with converted URLs
+ */
+function convertTempImageUrls(text, sitePath, postId) {
+  if (!text || typeof text !== 'string') return text;
+
+  const tempDir = path.join(sitePath, 'input', 'media', 'posts', 'temp');
+  const postDir = path.join(sitePath, 'input', 'media', 'posts', postId.toString());
+  const tempDirNormalized = normalizePath(tempDir);
+
+  // First, normalize all file:// URLs to a consistent format
+  // file://// -> file:/// and handle both /home and home after slashes
+  let convertedText = text;
+
+  // Extract filenames from file:/// URLs pointing to temp directory
+  // Handle both: file:///home/... and file:////home/... (extra slashes)
+  const tempDirWithoutSlash = tempDirNormalized.replace(/^\//, '');
+  const escapedTempDir = tempDirWithoutSlash.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Match file:// followed by any number of slashes, optional leading slash, then the temp path
+  const fileUrlPattern = new RegExp(`file:/{2,}/?${escapedTempDir}/([^"'\\s]+)`, 'gi');
+
+  const matches = [...text.matchAll(fileUrlPattern)];
+  const filesToCopy = new Set();
+
+  for (const match of matches) {
+    filesToCopy.add(match[1]); // filename including responsive/ subdirectory
+    console.error(`[MCP] Found temp image: ${match[1]}`);
+  }
+
+  // Copy files from temp to post directory if they exist
+  if (filesToCopy.size > 0) {
+    try {
+      fs.ensureDirSync(postDir);
+
+      for (const filename of filesToCopy) {
+        const srcFile = path.join(tempDir, filename);
+        const destFile = path.join(postDir, filename);
+
+        if (fs.existsSync(srcFile)) {
+          fs.ensureDirSync(path.dirname(destFile));
+          fs.copySync(srcFile, destFile);
+          console.error(`[MCP] Copied image: ${filename} to post ${postId}`);
+        } else {
+          console.error(`[MCP] Warning: Source file not found: ${srcFile}`);
+        }
+      }
+    } catch (e) {
+      console.error(`[MCP] Warning: Could not copy images: ${e.message}`);
+    }
+  }
+
+  // Convert URLs: file:///path/to/temp/image.jpg -> #DOMAIN_NAME#image.jpg
+  // Use #DOMAIN_NAME# placeholder so Publii editor can display images
+  convertedText = convertedText.replace(fileUrlPattern, `#DOMAIN_NAME#$1`);
+
+  console.error(`[MCP] URL conversion complete for post ${postId}, found ${filesToCopy.size} images`);
+
+  return convertedText;
+}
+
 class PostTools {
   /**
    * Get tool definitions for MCP protocol
@@ -74,7 +183,7 @@ class PostTools {
             },
             text: {
               type: 'string',
-              description: 'Post content as HTML (REQUIRED). Example: "<p>Hello world!</p><h2>Section</h2><p>More content...</p>". To include images: 1) First upload with upload_image (postId=0), 2) Use the returned file:/// URL in your HTML: <img src="file:///...temp/image.jpg">, 3) The URL is automatically converted to #DOMAIN_NAME# when saved.'
+              description: 'Post content as HTML (REQUIRED). Example: "<p>Hello world!</p><h2>Section</h2><p>More content...</p>". To include images: 1) Upload with upload_image, 2) Use the returned relative URL in your HTML: <img src="/media/posts/88/image.jpg">. For new posts, upload with postId=0 first, then use the URL from the response.'
             },
             slug: {
               type: 'string',
@@ -397,7 +506,8 @@ class PostTools {
       }
 
       // Transform block editor content if needed
-      let postText = args.text;
+      // Strip CDATA wrapper if present (AI assistants sometimes add this)
+      let postText = stripCDATA(args.text);
       const editorType = args.editor || 'tinymce';
 
       if (editorType === 'blockeditor') {
@@ -408,6 +518,23 @@ class PostTools {
           db: null    // Images will be registered after post is saved
         });
         console.error('[MCP] Transformed block editor content for new post');
+      }
+
+      // BEFORE calling post.save(), backup temp images so they survive multiple post creations
+      // Post.save() deletes temp after processing the first post
+      const sitePath = path.join(appInstance.sitesDir, args.site);
+      const tempDir = path.join(sitePath, 'input', 'media', 'posts', 'temp');
+      const backupDir = path.join(sitePath, 'input', 'media', 'posts', 'mcp-backup');
+
+      // Backup temp files if they exist
+      if (fs.existsSync(tempDir)) {
+        try {
+          fs.ensureDirSync(backupDir);
+          fs.copySync(tempDir, backupDir, { overwrite: true });
+          console.error('[MCP] Backed up temp images to mcp-backup');
+        } catch (e) {
+          console.error('[MCP] Warning: Could not backup temp images:', e.message);
+        }
       }
 
       const postData = {
@@ -439,14 +566,82 @@ class PostTools {
       const post = new Post(appInstance, postData);
       const result = post.save();
 
+      // Convert temp URLs to post-specific URLs
+      // This handles both file:/// URLs and /media/posts/temp/ relative URLs
+      if (result.postID) {
+        try {
+          const savedPost = appInstance.db.prepare('SELECT text FROM posts WHERE id = @id').get({ id: result.postID });
+
+          if (savedPost && savedPost.text) {
+            let convertedText = savedPost.text;
+            let needsUpdate = false;
+
+            // Handle file:/// URLs (legacy format)
+            if (convertedText.includes('file:///')) {
+              // Restore temp from backup so convertTempImageUrls can find the files
+              if (fs.existsSync(backupDir) && !fs.existsSync(tempDir)) {
+                fs.copySync(backupDir, tempDir);
+                console.error('[MCP] Restored temp from mcp-backup');
+              }
+              convertedText = convertTempImageUrls(convertedText, sitePath, result.postID);
+              needsUpdate = true;
+              console.error('[MCP] Converted file:/// URLs to relative paths for post', result.postID);
+            }
+
+            // Handle /media/posts/temp/ relative URLs (new format from upload_image)
+            if (convertedText.includes('/media/posts/temp/')) {
+              // First, copy files from temp to post directory
+              const postDir = path.join(sitePath, 'input', 'media', 'posts', result.postID.toString());
+              const tempDirForCopy = path.join(sitePath, 'input', 'media', 'posts', 'temp');
+
+              // Also check mcp-backup if temp was already processed
+              const backupDirForCopy = path.join(sitePath, 'input', 'media', 'posts', 'mcp-backup');
+              const sourceDir = fs.existsSync(tempDirForCopy) ? tempDirForCopy :
+                               (fs.existsSync(backupDirForCopy) ? backupDirForCopy : null);
+
+              if (sourceDir) {
+                // Extract filenames from content
+                const imgRegex = /\/media\/posts\/temp\/([^"'\s]+)/g;
+                const imgMatches = [...convertedText.matchAll(imgRegex)];
+                const filesToCopy = new Set(imgMatches.map(m => m[1]));
+
+                if (filesToCopy.size > 0) {
+                  fs.ensureDirSync(postDir);
+                  for (const filename of filesToCopy) {
+                    const srcFile = path.join(sourceDir, filename);
+                    const destFile = path.join(postDir, filename);
+                    if (fs.existsSync(srcFile)) {
+                      fs.ensureDirSync(path.dirname(destFile));
+                      fs.copySync(srcFile, destFile);
+                      console.error(`[MCP] Copied content image: ${filename} to post ${result.postID}`);
+                    }
+                  }
+                }
+              }
+
+              // Then update URLs in content - use #DOMAIN_NAME# placeholder so Publii editor can display images
+              convertedText = convertedText.replace(/\/media\/posts\/temp\//g, `#DOMAIN_NAME#`);
+              needsUpdate = true;
+              console.error('[MCP] Converted /media/posts/temp/ URLs to #DOMAIN_NAME# for post', result.postID);
+            }
+
+            if (needsUpdate) {
+              appInstance.db.prepare('UPDATE posts SET text = @text WHERE id = @id').run({ text: convertedText, id: result.postID });
+            }
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not convert image URLs:', e.message);
+        }
+      }
+
       // Fix block editor image URLs: Post.save() produces #DOMAIN_NAME#/filename
       // but it should be #DOMAIN_NAME#filename (without the slash)
       if (editorType === 'blockeditor' && result.postID) {
         try {
-          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = ?').get(result.postID);
+          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = @id').get({ id: result.postID });
           if (fixedText && fixedText.text && fixedText.text.includes('#DOMAIN_NAME#/')) {
             const correctedText = fixedText.text.replace(/#DOMAIN_NAME#\//g, '#DOMAIN_NAME#');
-            appInstance.db.prepare('UPDATE posts SET text = ? WHERE id = ?').run(correctedText, result.postID);
+            appInstance.db.prepare('UPDATE posts SET text = @text WHERE id = @id').run({ text: correctedText, id: result.postID });
             console.error('[MCP] Fixed block editor image URLs for post', result.postID);
           }
         } catch (e) {
@@ -579,7 +774,8 @@ class PostTools {
       const editorType = args.editor !== undefined ? args.editor : (existingData.additionalData?.editor || 'tinymce');
 
       // Transform block editor content if text is being updated
-      let postText = args.text !== undefined ? args.text : existing.text;
+      // Strip CDATA wrapper if present (AI assistants sometimes add this)
+      let postText = args.text !== undefined ? stripCDATA(args.text) : existing.text;
       if (args.text !== undefined && editorType === 'blockeditor') {
         const sitePath = path.join(appInstance.sitesDir, args.site);
         postText = BlockEditorHelper.transformContent(args.text, {
@@ -617,14 +813,73 @@ class PostTools {
       const updatedPost = new Post(appInstance, postData);
       const result = updatedPost.save();
 
+      // Convert temp URLs to post-specific URLs
+      if (args.text !== undefined) {
+        try {
+          const savedPost = appInstance.db.prepare('SELECT text FROM posts WHERE id = @id').get({ id: args.id });
+          if (savedPost && savedPost.text) {
+            let convertedText = savedPost.text;
+            let needsUpdate = false;
+
+            // Handle file:/// URLs
+            if (convertedText.includes('file:///')) {
+              const sitePath = path.join(appInstance.sitesDir, args.site);
+              convertedText = convertAllFileUrls(convertedText, sitePath, args.id);
+              needsUpdate = true;
+              console.error('[MCP] Converted file:/// URLs to relative paths for post', args.id);
+            }
+
+            // Handle /media/posts/temp/ relative URLs
+            if (convertedText.includes('/media/posts/temp/')) {
+              // First, copy files from temp to post directory
+              const postDir = path.join(sitePath, 'input', 'media', 'posts', args.id.toString());
+              const tempDirForCopy = path.join(sitePath, 'input', 'media', 'posts', 'temp');
+              const backupDirForCopy = path.join(sitePath, 'input', 'media', 'posts', 'mcp-backup');
+              const sourceDir = fs.existsSync(tempDirForCopy) ? tempDirForCopy :
+                               (fs.existsSync(backupDirForCopy) ? backupDirForCopy : null);
+
+              if (sourceDir) {
+                const imgRegex = /\/media\/posts\/temp\/([^"'\s]+)/g;
+                const imgMatches = [...convertedText.matchAll(imgRegex)];
+                const filesToCopy = new Set(imgMatches.map(m => m[1]));
+
+                if (filesToCopy.size > 0) {
+                  fs.ensureDirSync(postDir);
+                  for (const filename of filesToCopy) {
+                    const srcFile = path.join(sourceDir, filename);
+                    const destFile = path.join(postDir, filename);
+                    if (fs.existsSync(srcFile)) {
+                      fs.ensureDirSync(path.dirname(destFile));
+                      fs.copySync(srcFile, destFile);
+                      console.error(`[MCP] Copied content image: ${filename} to post ${args.id}`);
+                    }
+                  }
+                }
+              }
+
+              // Use #DOMAIN_NAME# placeholder so Publii editor can display images
+              convertedText = convertedText.replace(/\/media\/posts\/temp\//g, `#DOMAIN_NAME#`);
+              needsUpdate = true;
+              console.error('[MCP] Converted /media/posts/temp/ URLs to #DOMAIN_NAME# for post', args.id);
+            }
+
+            if (needsUpdate) {
+              appInstance.db.prepare('UPDATE posts SET text = @text WHERE id = @id').run({ text: convertedText, id: args.id });
+            }
+          }
+        } catch (e) {
+          console.error('[MCP] Warning: Could not convert URLs:', e.message);
+        }
+      }
+
       // Fix block editor image URLs: Post.save() produces #DOMAIN_NAME#/filename
       // but it should be #DOMAIN_NAME#filename (without the slash)
       if (editorType === 'blockeditor') {
         try {
-          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = ?').get(args.id);
+          const fixedText = appInstance.db.prepare('SELECT text FROM posts WHERE id = @id').get({ id: args.id });
           if (fixedText && fixedText.text && fixedText.text.includes('#DOMAIN_NAME#/')) {
             const correctedText = fixedText.text.replace(/#DOMAIN_NAME#\//g, '#DOMAIN_NAME#');
-            appInstance.db.prepare('UPDATE posts SET text = ? WHERE id = ?').run(correctedText, args.id);
+            appInstance.db.prepare('UPDATE posts SET text = @text WHERE id = @id').run({ text: correctedText, id: args.id });
             console.error('[MCP] Fixed block editor image URLs for post', args.id);
           }
         } catch (e) {

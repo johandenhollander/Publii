@@ -9,6 +9,7 @@
                 onChangeEventName="tags-filter-value-changed" />
 
             <p-button
+                v-if="$store.state.app.config.experimentalMcpIntegration"
                 :onClick="refreshTags"
                 slot="buttons"
                 type="outline icon"
