@@ -400,7 +400,7 @@ class PostTools {
       }
     }
 
-    appInstance.db = new DBUtils(new Database(dbPath));
+    appInstance.db = new DBUtils(new Database(dbPath), true);
     console.error(`[MCP] Connected to database: ${dbPath}`);
   }
 

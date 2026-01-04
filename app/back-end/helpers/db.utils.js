@@ -4,10 +4,10 @@ const os = require('os');
  * Other helper functions
  */
 class DBUtils {
-    constructor (dbInstance) {
-        this.DB = dbInstance; 
+    constructor (dbInstance, forceWASM = false) {
+        this.DB = dbInstance;
         this.statement = '';
-        this.useWASM = os.platform() === 'linux';
+        this.useWASM = forceWASM || os.platform() === 'linux';
     }
 
     prepare (sqlStatement) {
