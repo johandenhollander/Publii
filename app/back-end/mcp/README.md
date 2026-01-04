@@ -14,10 +14,40 @@ With the Publii MCP server, Claude can:
 
 All without having Publii open!
 
-## Requirements
+## Prerequisites
 
-- **Node.js 18+** - [Download here](https://nodejs.org/)
-- **Publii** - Installed with at least one site
+### Node.js (Required)
+
+The MCP server requires Node.js to run. **You must install Node.js before using the MCP integration.**
+
+#### Windows
+
+1. Download the LTS installer from [nodejs.org](https://nodejs.org/)
+2. Run the installer and follow the prompts
+3. Restart your terminal/command prompt after installation
+4. Verify installation: `node --version` (should show v18 or higher)
+
+#### macOS
+
+Option 1 - Download installer:
+1. Download the LTS installer from [nodejs.org](https://nodejs.org/)
+2. Run the installer
+
+Option 2 - Using Homebrew:
+```bash
+brew install node
+```
+
+#### Linux (Debian/Ubuntu)
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+### Other Requirements
+
+- **Publii** - Installed with at least one site created
 - **Claude Desktop** or **Claude Code** - As MCP client
 
 ## Installation
@@ -202,6 +232,15 @@ Read operations (`list_*`, `get_*`) do not acquire locks.
 - Locks older than 60 seconds are automatically invalidated
 
 ## Troubleshooting
+
+### "node is not recognized" or "command not found: node"
+
+Node.js is not installed or not in your PATH.
+
+1. Install Node.js following the [Prerequisites](#prerequisites) section
+2. **Windows**: Restart your terminal or computer after installation
+3. **macOS/Linux**: Run `source ~/.bashrc` or open a new terminal
+4. Verify with: `node --version`
 
 ### "Cannot find module" error
 
