@@ -43,3 +43,4 @@ release/Setup.wixobj
 *.wixpdb
 release/Setup.wxs
 .vscode
+CLAUDE.md
