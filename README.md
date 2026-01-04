@@ -4,9 +4,12 @@
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-brightgreen.svg)](https://modelcontextprotocol.io/)
 [![Based on Publii](https://img.shields.io/badge/Based%20on-Publii%200.47.4-blue.svg)](https://getpublii.com/)
 
-**Static site management through AI assistants.** This fork extends [Publii](https://getpublii.com/) with [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) support, enabling any MCP-compatible AI to manage your websites.
+> **Warning**
+> This project is a **Proof of Concept** and **Work in Progress**. While functional, it may contain bugs or incomplete features. Use at your own risk and always backup your sites before using MCP operations.
+>
+> **Feedback, bug reports, and contributions are very welcome!** Please open an issue or pull request on GitHub.
 
-**Current version: 0.47.4-mcp.1 (build 17405)**
+**Static site management through AI assistants.** This fork extends [Publii](https://getpublii.com/) with [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) support, enabling any MCP-compatible AI to manage your websites.
 
 ---
 
@@ -48,15 +51,33 @@ All original features preserved:
 
 ---
 
+## Prerequisites
+
+### Node.js (Required)
+
+The MCP server requires **Node.js 18 or higher** to run. You must install Node.js before using the MCP integration.
+
+| Platform | Installation |
+|----------|--------------|
+| **Windows** | Download LTS installer from [nodejs.org](https://nodejs.org/), restart terminal after install |
+| **macOS** | Download from [nodejs.org](https://nodejs.org/) or use `brew install node` |
+| **Linux** | Use your package manager or [NodeSource](https://github.com/nodesource/distributions) |
+
+Verify installation: `node --version` (should show v18 or higher)
+
+---
+
 ## Installation
 
 ### 1. Download
 
+Download the latest release for your platform from the [Releases](https://github.com/johandenhollander/Publii/releases) page:
+
 | Platform | Format |
 |----------|--------|
 | Linux | `.deb`, `.AppImage` |
-| Windows | Coming soon |
-| macOS | Coming soon |
+| Windows | `.exe` installer |
+| macOS | `.dmg` |
 
 ### 2. Enable MCP
 
@@ -72,15 +93,23 @@ Add to your MCP configuration:
   "mcpServers": {
     "publii": {
       "command": "node",
-      "args": ["/opt/Publii/resources/app/back-end/mcp/cli.js"]
+      "args": ["/path/to/Publii/resources/app/back-end/mcp/cli.js"]
     }
   }
 }
 ```
 
-**Configuration locations:**
-- Claude Desktop: `~/.config/Claude/claude_desktop_config.json`
-- Claude Code: `claude mcp add publii node /path/to/cli.js`
+**Default installation paths:**
+- **Linux (deb):** `/opt/Publii/resources/app/back-end/mcp/cli.js`
+- **Linux (AppImage):** Run AppImage once, then check `~/.config/Publii/`
+- **Windows:** `%LOCALAPPDATA%\Programs\Publii\resources\app\back-end\mcp\cli.js`
+- **macOS:** `/Applications/Publii.app/Contents/Resources/app/back-end/mcp/cli.js`
+
+**Configuration file locations:**
+- **Claude Desktop (Linux):** `~/.config/Claude/claude_desktop_config.json`
+- **Claude Desktop (macOS):** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Claude Desktop (Windows):** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Claude Code:** `claude mcp add publii node /path/to/cli.js`
 
 ---
 
@@ -127,21 +156,43 @@ Add to your MCP configuration:
 
 ---
 
+## Troubleshooting
+
+### "node is not recognized" or "command not found: node"
+
+Node.js is not installed or not in your PATH. See [Prerequisites](#prerequisites).
+
+### MCP tools not appearing in Claude
+
+1. Restart Claude Desktop/Code after configuration changes
+2. Verify the path to `cli.js` is correct for your installation
+3. Test manually: `node /path/to/cli.js`
+
+### "Database is locked" error
+
+Wait a few seconds and retry. The MCP server queues operations to prevent conflicts.
+
+For more troubleshooting, see the [MCP README](app/back-end/mcp/README.md).
+
+---
+
 ## Development
 
 ### Building from Source
 
 ```bash
-git clone https://github.com/your-repo/Publii-fork.git
-cd Publii-fork
+git clone https://github.com/johandenhollander/Publii.git
+cd Publii
 npm install && cd app && npm install && cd ..
 npm run prod && npm run prepare-editor
 
-# Development
+# Development mode
 npm run build2
 
 # Production packages
 npx electron-builder build --linux deb AppImage
+npx electron-builder build --win nsis
+npx electron-builder build --mac dmg
 ```
 
 ### Project Structure
@@ -161,6 +212,16 @@ app/back-end/mcp/
     ├── media.js        # Media handling
     └── deploy.js       # Render & deployment
 ```
+
+---
+
+## Contributing
+
+This is a proof of concept and contributions are welcome! If you encounter bugs, have feature requests, or want to improve the code:
+
+1. **Bug Reports:** Open an issue with steps to reproduce
+2. **Feature Requests:** Open an issue describing the use case
+3. **Pull Requests:** Fork, make changes, and submit a PR
 
 ---
 
