@@ -99,12 +99,12 @@ class App {
      */
     checkDirs() {
         if (!fs.existsSync(this.appDir)) {
-            fs.mkdirSync(this.appDir);
+            fs.mkdirSync(this.appDir, { recursive: true });
 
-            // Create also other dirs
-            fs.mkdirSync(path.join(this.appDir, 'sites'));
-            fs.mkdirSync(path.join(this.appDir, 'config'));
-            fs.mkdirSync(path.join(this.appDir, 'themes'));
+            // Create also other dirs (use recursive to handle partial installations)
+            fs.mkdirSync(path.join(this.appDir, 'sites'), { recursive: true });
+            fs.mkdirSync(path.join(this.appDir, 'config'), { recursive: true });
+            fs.mkdirSync(path.join(this.appDir, 'themes'), { recursive: true });
             fs.copySync(
                 path.join(__dirname, '..', 'default-files', 'default-themes').replace('app.asar', 'app.asar.unpacked'),
                 path.join(this.appDir, 'themes'),
@@ -113,8 +113,8 @@ class App {
                     dereference: true
                 }
             );
-            fs.mkdirSync(path.join(this.appDir, 'languages'));
-            fs.mkdirSync(path.join(this.appDir, 'plugins'));
+            fs.mkdirSync(path.join(this.appDir, 'languages'), { recursive: true });
+            fs.mkdirSync(path.join(this.appDir, 'plugins'), { recursive: true });
         }
 
         if (!fs.existsSync(path.join(this.appDir, 'backups'))) {
