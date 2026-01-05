@@ -122,14 +122,18 @@ class DeployTools {
 
   /**
    * Handle tool calls
+   * @param {string} toolName - The tool to execute
+   * @param {object} args - Tool arguments
+   * @param {object} appInstance - App instance
+   * @param {function} sendProgress - Optional callback for progress notifications (progress, total, message)
    */
-  static async handleToolCall(toolName, args, appInstance) {
+  static async handleToolCall(toolName, args, appInstance, sendProgress = null) {
     switch (toolName) {
       case 'render_site':
-        return await this.renderSite(args.site, appInstance);
+        return await this.renderSite(args.site, appInstance, sendProgress);
 
       case 'deploy_site':
-        return await this.deploySite(args.site, appInstance);
+        return await this.deploySite(args.site, appInstance, sendProgress);
 
       case 'get_sync_status':
         return await this.getSyncStatus(args.site, appInstance);
@@ -141,8 +145,11 @@ class DeployTools {
 
   /**
    * Render site - generate static HTML
+   * @param {string} siteName - Site to render
+   * @param {object} appInstance - App instance
+   * @param {function} sendProgress - Optional callback for progress notifications
    */
-  static async renderSite(siteName, appInstance) {
+  static async renderSite(siteName, appInstance, sendProgress = null) {
     try {
       // Validate site exists
       if (!appInstance.sites || !appInstance.sites[siteName]) {
@@ -155,8 +162,13 @@ class DeployTools {
 
       console.error(`[MCP] Starting render for site: ${siteName}`);
 
+      // Send initial progress
+      if (sendProgress) {
+        await sendProgress(0, 100, 'Starting render...');
+      }
+
       // Use worker process like Publii does for proper progress handling
-      const result = await this.runRendererWorker(appInstance, siteConfig);
+      const result = await this.runRendererWorker(appInstance, siteConfig, sendProgress);
 
       if (result.success) {
         // Count generated files
@@ -192,8 +204,11 @@ class DeployTools {
 
   /**
    * Run renderer worker process
+   * @param {object} appInstance - App instance
+   * @param {object} siteConfig - Site configuration
+   * @param {function} sendProgress - Optional callback for progress notifications
    */
-  static runRendererWorker(appInstance, siteConfig) {
+  static runRendererWorker(appInstance, siteConfig, sendProgress = null) {
     return new Promise((resolve, reject) => {
       // Use basedir (installation directory) for worker paths, not appDir (user data directory)
       const workerPath = path.join(appInstance.basedir, 'back-end', 'workers', 'renderer', 'preview.js');
@@ -257,6 +272,11 @@ class DeployTools {
           lastProgress = data.progress || 0;
           progressMessages.push(data.message);
           console.error(`[MCP] Render progress: ${lastProgress}% - ${data.message}`);
+
+          // Send MCP progress notification
+          if (sendProgress) {
+            sendProgress(lastProgress, 100, data.message).catch(() => {});
+          }
         }
       });
 
@@ -303,8 +323,11 @@ class DeployTools {
 
   /**
    * Deploy site to configured server
+   * @param {string} siteName - Site to deploy
+   * @param {object} appInstance - App instance
+   * @param {function} sendProgress - Optional callback for progress notifications
    */
-  static async deploySite(siteName, appInstance) {
+  static async deploySite(siteName, appInstance, sendProgress = null) {
     const protocol = appInstance.sites?.[siteName]?.deployment?.protocol || 'unknown';
     const startTime = Date.now();
 
@@ -330,8 +353,13 @@ class DeployTools {
 
       console.error(`[MCP] Starting deployment for site: ${siteName} (protocol: ${protocol})`);
 
+      // Send initial progress
+      if (sendProgress) {
+        await sendProgress(0, 100, 'Starting deployment...');
+      }
+
       // Run deployment worker
-      const result = await this.runDeploymentWorker(appInstance, siteConfig, siteName);
+      const result = await this.runDeploymentWorker(appInstance, siteConfig, siteName, sendProgress);
 
       if (result.success) {
         // Update sync status in config
@@ -401,8 +429,12 @@ class DeployTools {
 
   /**
    * Run deployment worker process
+   * @param {object} appInstance - App instance
+   * @param {object} siteConfig - Site configuration
+   * @param {string} siteName - Site name
+   * @param {function} sendProgress - Optional callback for progress notifications
    */
-  static runDeploymentWorker(appInstance, siteConfig, siteName) {
+  static runDeploymentWorker(appInstance, siteConfig, siteName, sendProgress = null) {
     return new Promise((resolve, reject) => {
       // Use basedir (installation directory) for worker paths
       const workerPath = path.join(appInstance.basedir, 'back-end', 'workers', 'deploy', 'deployment.js');
@@ -455,6 +487,13 @@ class DeployTools {
           if (message === 'app-uploading-progress') {
             lastProgress = value.progress || 0;
             console.error(`[MCP] Upload progress: ${lastProgress}%`);
+
+            // Send MCP progress notification
+            if (sendProgress) {
+              const ops = value.operations;
+              const msg = ops ? `Uploading files (${ops[0]}/${ops[1]})` : `Uploading... ${lastProgress}%`;
+              sendProgress(lastProgress, 100, msg).catch(() => {});
+            }
           } else if (message === 'app-deploy-uploaded') {
             clearTimeout(timeout);
             if (!hasResolved) {

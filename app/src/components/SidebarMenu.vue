@@ -19,6 +19,11 @@
                     v-if="item.isMcp"
                     :class="mcpStatusClass"
                     class="mcp-status-dot"></span>
+                <!-- MCP Progress bar (bottom border) -->
+                <span
+                    v-if="item.isMcp && mcpHasProgress"
+                    :class="['mcp-progress-bar', mcpIsDeployOperation ? 'mcp-progress-rainbow' : 'mcp-progress-gray']"
+                    :style="{ width: mcpProgressPercent + '%' }"></span>
             </router-link>
         </li>
     </ul>
@@ -182,6 +187,8 @@ export default {
 
         a {
             display: flex;
+            position: relative;
+            overflow: hidden;
         }
 
         &.is-active {

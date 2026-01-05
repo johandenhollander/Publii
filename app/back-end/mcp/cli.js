@@ -321,6 +321,37 @@ function clearLock() {
   }
 }
 
+// Throttle progress updates to max 5x per second
+let lastProgressUpdate = 0;
+const PROGRESS_THROTTLE_MS = 200;
+
+/**
+ * Update progress in status file for UI display
+ * Used by render_site and deploy_site to show real-time progress
+ */
+function updateProgress(site, operation, progress, total, message) {
+  try {
+    // Throttle updates to reduce disk I/O
+    const now = Date.now();
+    if (now - lastProgressUpdate < PROGRESS_THROTTLE_MS && progress < 100) {
+      return;
+    }
+    lastProgressUpdate = now;
+
+    const status = readStatusFile();
+    if (status.activeLock && status.activeLock.sessionId === sessionId) {
+      status.activeLock.progress = progress;
+      status.activeLock.total = total;
+      status.activeLock.message = message;
+      status.activeLock.progressUpdatedAt = now;
+      fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
+      log.trace(`Progress update: ${progress}/${total} - ${message}`);
+    }
+  } catch (e) {
+    // Ignore errors - progress updates are best-effort
+  }
+}
+
 /**
  * Check if an operation requires database write (needs lock)
  */
@@ -428,9 +459,21 @@ function formatActivitySummary(toolName, args) {
     case 'upload_file':
       return `${site} Upload file`;
     case 'render_site':
-      return `${site} Render site (generate HTML)`;
+      if (args._phase === 'start') {
+        return `${site} Rendering site...`;
+      } else if (args._phase === 'complete') {
+        const duration = args._duration ? ` (${Math.round(args._duration / 1000)}s)` : '';
+        return `${site} Render complete${duration}`;
+      }
+      return `${site} Render site`;
     case 'deploy_site':
-      return `${site} Deploy site to server`;
+      if (args._phase === 'start') {
+        return `${site} Deploying to server...`;
+      } else if (args._phase === 'complete') {
+        const duration = args._duration ? ` (${Math.round(args._duration / 1000)}s)` : '';
+        return `${site} Deploy complete${duration}`;
+      }
+      return `${site} Deploy site`;
     case 'get_sync_status':
       return `${site} Get sync status`;
     default:
@@ -551,6 +594,7 @@ async function main() {
   // Handle tool calls - queued for sequential processing
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const progressToken = request.params._meta?.progressToken;
     const requestId = ++toolCallCount;
 
     log.info(`Tool request #${requestId}: ${name}`, { args: args ? Object.keys(args) : [] });
@@ -563,9 +607,8 @@ async function main() {
         log.debug(`Starting request #${requestId}: ${name}`);
 
         try {
-          // Update status and log activity
+          // Update status
           updateStatusFile();
-          logActivity(name, args || {});
 
           // Reload sites on each call (in case they changed)
           appInstance.sites = loadSites();
@@ -575,6 +618,38 @@ async function main() {
           if (needsLock && args && args.site) {
             setLock(args.site, name);
           }
+
+          // Log start message for render and deploy operations
+          if (name === 'render_site' || name === 'deploy_site') {
+            logActivity(name, { ...args, _phase: 'start' });
+          }
+
+          // Create progress callback for long-running operations
+          // This writes to status file (for Publii UI) AND sends MCP notifications (if supported)
+          const sendProgress = async (progress, total, message) => {
+            // Always update status file for Publii UI progress display
+            if (args && args.site) {
+              updateProgress(args.site, name, progress, total, message);
+            }
+
+            // Also send MCP progress notification if client supports it
+            if (progressToken) {
+              try {
+                log.debug(`Sending progress notification: ${progress}/${total} - ${message}`);
+                await server.notification({
+                  method: 'notifications/progress',
+                  params: {
+                    progressToken,
+                    progress,
+                    total,
+                    message
+                  }
+                });
+              } catch (e) {
+                log.warn('Failed to send progress notification:', { error: e.message });
+              }
+            }
+          };
 
           let toolResult;
 
@@ -593,7 +668,7 @@ async function main() {
             } else if (name === 'list_media' || name === 'upload_image' || name === 'upload_file' || name === 'delete_media' || name === 'get_media_info') {
               toolResult = await MediaTools.handleToolCall(name, args, appInstance);
             } else if (name === 'render_site' || name === 'deploy_site' || name === 'get_sync_status') {
-              toolResult = await DeployTools.handleToolCall(name, args, appInstance);
+              toolResult = await DeployTools.handleToolCall(name, args, appInstance, sendProgress);
             } else {
               throw new Error(`Unknown tool: ${name}`);
             }
@@ -607,6 +682,14 @@ async function main() {
           const duration = Date.now() - activeRequest.startedAt;
           log.info(`Completed request #${requestId}: ${name} (${duration}ms)`);
           activeRequest = null;
+
+          // Log activity AFTER successful completion so UI refresh sees the new data
+          // For render/deploy, add complete phase and duration
+          if (name === 'render_site' || name === 'deploy_site') {
+            logActivity(name, { ...(args || {}), _phase: 'complete', _duration: duration });
+          } else {
+            logActivity(name, args || {});
+          }
 
           resolve(toolResult);
         } catch (error) {

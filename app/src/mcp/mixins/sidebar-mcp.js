@@ -15,9 +15,11 @@ export default {
             mcpStatus: {
                 active: false,
                 isStale: true,
-                processRunning: false
+                processRunning: false,
+                activeLock: null
             },
-            mcpPollInterval: null
+            mcpPollInterval: null,
+            mcpFastPollInterval: null
         };
     },
 
@@ -26,12 +28,50 @@ export default {
          * CSS class for MCP status indicator
          */
         mcpStatusClass() {
+            if (this.mcpHasProgress) {
+                return 'mcp-progress';
+            }
             if (this.mcpStatus.active && this.mcpStatus.processRunning && !this.mcpStatus.isStale) {
                 return 'mcp-active';
             } else if (this.mcpStatus.active && this.mcpStatus.isStale) {
                 return 'mcp-idle';
             }
             return 'mcp-inactive';
+        },
+
+        /**
+         * Check if there's an active operation with progress
+         */
+        mcpHasProgress() {
+            const lock = this.mcpStatus.activeLock;
+            return lock &&
+                   !lock.isCompleted &&
+                   lock.progress !== undefined &&
+                   lock.progress !== null;
+        },
+
+        /**
+         * Progress percentage (0-100)
+         */
+        mcpProgressPercent() {
+            if (!this.mcpHasProgress) return 0;
+            return Math.min(100, Math.max(0, this.mcpStatus.activeLock.progress || 0));
+        },
+
+        /**
+         * Check if current operation is deploy (rainbow) or render (gray)
+         */
+        mcpIsDeployOperation() {
+            const lock = this.mcpStatus.activeLock;
+            return lock && lock.operation === 'deploy_site';
+        },
+
+        /**
+         * Check if there's any active lock (for fast polling)
+         */
+        mcpHasActiveLock() {
+            const lock = this.mcpStatus.activeLock;
+            return lock && !lock.isCompleted;
         },
 
         /**
@@ -68,11 +108,21 @@ export default {
             mainProcessAPI.send('app-mcp-cli-status');
             mainProcessAPI.receiveOnce('app-mcp-cli-status-result', (status) => {
                 this.mcpStatus = status;
+
+                // Start fast polling when ANY active lock is detected (not just progress)
+                // This ensures we catch fast operations like render
+                if (this.mcpHasActiveLock && !this.mcpFastPollInterval) {
+                    this.startFastPolling();
+                }
+                // Stop fast polling when no more active lock
+                if (!this.mcpHasActiveLock && this.mcpFastPollInterval) {
+                    this.stopFastPolling();
+                }
             });
         },
 
         /**
-         * Start polling MCP status
+         * Start polling MCP status (normal speed)
          */
         startMcpPolling() {
             if (this.mcpEnabled) {
@@ -90,6 +140,27 @@ export default {
             if (this.mcpPollInterval) {
                 clearInterval(this.mcpPollInterval);
                 this.mcpPollInterval = null;
+            }
+            this.stopFastPolling();
+        },
+
+        /**
+         * Start fast polling during active operations (every 250ms)
+         */
+        startFastPolling() {
+            if (this.mcpFastPollInterval) return;
+            this.mcpFastPollInterval = setInterval(() => {
+                this.checkMcpStatus();
+            }, 250);
+        },
+
+        /**
+         * Stop fast polling
+         */
+        stopFastPolling() {
+            if (this.mcpFastPollInterval) {
+                clearInterval(this.mcpFastPollInterval);
+                this.mcpFastPollInterval = null;
             }
         }
     }

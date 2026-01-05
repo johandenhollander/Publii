@@ -25,13 +25,73 @@
     &.mcp-inactive {
         background: #6b7280;
     }
+
+    &.mcp-progress {
+        background: #f97316;
+        box-shadow: 0 0 6px #f97316;
+        animation: mcp-pulse-progress 0.5s infinite;
+    }
+}
+
+// Progress bar base styles
+.mcp-progress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    border-radius: 0 2px 2px 0;
+    transition: width 0.3s ease;
+}
+
+// Gray progress bar for render (boring work)
+.mcp-progress-gray {
+    background: linear-gradient(90deg, #6b7280, #9ca3af);
+    box-shadow: 0 0 6px rgba(156, 163, 175, 0.5);
+}
+
+// Rainbow progress bar for deploy - WIZARD EDITION 🌈
+.mcp-progress-rainbow {
+    background: linear-gradient(
+        90deg,
+        #ff0000,
+        #ff8000,
+        #ffff00,
+        #00ff00,
+        #00ffff,
+        #0080ff,
+        #8000ff,
+        #ff00ff
+    );
+    background-size: 200% 100%;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.4);
+    animation: rainbow-flow 2s linear infinite;
+}
+
+@keyframes rainbow-flow {
+    0% {
+        background-position: 0% 50%;
+    }
+    100% {
+        background-position: 200% 50%;
+    }
 }
 
 @keyframes mcp-pulse {
     0%, 100% {
-        box-shadow: 0 0 6px #4ade80;
+        box-shadow: 0 0 4px 1px #4ade80;
+        transform: scale(1);
     }
     50% {
-        box-shadow: 0 0 12px #4ade80;
+        box-shadow: 0 0 6px 2px #4ade80;
+        transform: scale(1.1);
+    }
+}
+
+@keyframes mcp-pulse-progress {
+    0%, 100% {
+        box-shadow: 0 0 4px #f97316;
+    }
+    50% {
+        box-shadow: 0 0 10px #f97316;
     }
 }

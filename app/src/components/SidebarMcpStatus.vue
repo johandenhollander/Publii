@@ -8,6 +8,16 @@
         <span v-if="showDetails && statusDetails" class="mcp-status-details">
             {{ statusDetails }}
         </span>
+        <!-- Progress bar for render/deploy operations -->
+        <div v-if="hasProgress" class="mcp-progress">
+            <div class="mcp-progress-bar">
+                <div
+                    class="mcp-progress-fill"
+                    :style="{ width: progressPercent + '%' }">
+                </div>
+            </div>
+            <span class="mcp-progress-text">{{ progressText }}</span>
+        </div>
     </div>
 </template>
 
@@ -42,6 +52,26 @@ export default {
         },
         isLockCompleted() {
             return this.isLocked && this.mcpStatus.activeLock.isCompleted;
+        },
+        hasProgress() {
+            // Show progress bar when there's an active lock with progress data
+            return this.isLocked &&
+                   !this.isLockCompleted &&
+                   this.mcpStatus.activeLock.progress !== undefined &&
+                   this.mcpStatus.activeLock.progress !== null;
+        },
+        progressPercent() {
+            if (!this.hasProgress) return 0;
+            return Math.min(100, Math.max(0, this.mcpStatus.activeLock.progress || 0));
+        },
+        progressText() {
+            if (!this.hasProgress) return '';
+            const lock = this.mcpStatus.activeLock;
+            // Show message if available, otherwise just percentage
+            if (lock.message) {
+                return `${lock.progress}% - ${lock.message}`;
+            }
+            return `${lock.progress}%`;
         },
         statusClasses() {
             return {
@@ -227,6 +257,37 @@ export default {
         .mcp-status-dot {
             background: #6b7280;
         }
+    }
+}
+
+.mcp-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-left: 8px;
+    min-width: 80px;
+    max-width: 150px;
+
+    &-bar {
+        height: 4px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 2px;
+        overflow: hidden;
+    }
+
+    &-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #ef4444, #f97316);
+        border-radius: 2px;
+        transition: width 0.3s ease;
+    }
+
+    &-text {
+        font-size: 0.9rem;
+        color: rgba(255, 255, 255, 0.7);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 }
 
